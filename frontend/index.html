@@ -1,0 +1,1420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DeadDrop — Emergency recovery without a single point of trust</title>
+<meta name="description" content="DeadDrop is a publicly verifiable, policy-composable emergency recovery protocol that separates recovery authorization from cryptographic possession.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<script>
+  /* Add the intro class before first paint so entrance styles are in
+     place the instant CSS applies — but never for reduced-motion users. */
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduce && window.Element && Element.prototype.animate) {
+      document.documentElement.classList.add('intro');
+    }
+  })();
+</script>
+
+<style>
+  :root {
+    --black: #000;
+    --white: #fff;
+    --sub: #e6e6e6;
+    --muted: #949494;
+    --red: #c81b1c;
+    --red-dark: #a91516;
+    --line: rgba(255,255,255,.14);
+
+    --font-sg: 'SG', 'Space Grotesk', sans-serif;
+    --font-jb: 'JB', 'JetBrains Mono', monospace;
+
+    /* Desktop canvas: 1505 x 700 */
+    --s: min(100vw / 1505, 100vh / 700);
+    --bx: 60;
+    --by: 36;
+    --bs: 44;
+    --h1y: -12.5;
+    --suby: 167.5;
+    --numy: 19;
+    --laby: 74;
+
+    --sp-a: 239;
+    --sp-b: 194;
+    --sp-c: 115;
+  }
+
+  /* Tablet portrait: 900 x 1200 */
+  @media (max-width:1023px) and (max-aspect-ratio:1/1) {
+    :root {
+      --s: clamp(0.82px, min(100vw / 900, 100vh / 1200), 1.25px);
+      --bx: 56;
+      --by: 33;
+      --bs: 40;
+      --h1y: -10.25;
+      --suby: 137.4;
+      --numy: 15.6;
+      --laby: 60.7;
+      --sp-a: 340;
+      --sp-b: 276;
+      --sp-c: 163;
+    }
+  }
+
+  /* Phone: 430 x 620 */
+  @media (max-width:599px) {
+    :root {
+      --s: min(100vw / 430, 100vh / 620, 1.02px);
+      --bx: 26;
+      --by: 21;
+      --bs: 34;
+      --h1y: -7.1;
+      --suby: 108;
+      --numy: 13;
+      --laby: 50;
+      --sp-a: 106;
+      --sp-b: 92;
+      --sp-c: 56;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html {
+    background:#000;
+    scroll-behavior:smooth;
+  }
+
+  html, body {
+    min-height: 100%;
+    background: #000;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  body {
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+    color: var(--white);
+    font-family: var(--font-jb);
+  }
+
+  button { font: inherit; color: inherit; }
+
+  a { color: inherit; text-decoration: none; }
+
+  :focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 3px;
+  }
+
+  .screen {
+    position: relative;
+    width: 100%;
+    min-height: 100vh;
+    background: #000;
+    overflow: clip;
+  }
+
+  /* The cinematic stage remains viewport-locked while the document scrolls. */
+  .scene, .bg, .bg2, .scrim { position: fixed; }
+
+  /* ---------------- cinematic video atmosphere ---------------- */
+  .bg, .bg2 {
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .bg { filter:url(#grade); }
+  .bg video, .bg2 video {
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; object-position:center top; display:block;
+  }
+  .bg2 {
+    filter:url(#grade2);
+    mix-blend-mode:plus-lighter;
+    opacity:.35;
+    -webkit-mask-image:linear-gradient(180deg, transparent 21.5%, #000 100%);
+    mask-image:linear-gradient(180deg, transparent 21.5%, #000 100%);
+  }
+
+  /* ---------------- 3D scene layer ---------------- */
+  .scene {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+  }
+  .scene canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .scene-fallback {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .scene-fallback.active { display: flex; }
+  .scene-fallback svg { width: min(56vw, 900px); height: auto; opacity: .9; }
+
+  .hud-label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-jb);
+    font-size: calc(12.5 * var(--s));
+    letter-spacing: .12em;
+    color: var(--red);
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 3;
+  }
+
+  .node-readout {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform: translate(14px, -50%);
+    font-family: var(--font-jb);
+    font-size: calc(11.5 * var(--s));
+    line-height: 1.7;
+    color: var(--sub);
+    background: rgba(0,0,0,.5);
+    border-left: 2px solid var(--red);
+    padding: calc(6 * var(--s)) calc(10 * var(--s));
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 3;
+    transition: opacity .25s ease;
+  }
+  .node-readout .rk { color: var(--muted); margin-right: .6em; }
+  .node-readout .rv { color: #fff; }
+
+  /* ---------------- scrim ---------------- */
+  .scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    background: linear-gradient(90deg, #000 0%, #000 30%, rgba(0,0,0,.55) 48%, rgba(0,0,0,.08) 66%, transparent 82%);
+  }
+  @media (max-width:1023px) and (max-aspect-ratio:1/1) {
+    .bg2 { display:none; }
+    .bg video { object-position:right top; transform:scale(1.18); transform-origin:right top; }
+    .bg { -webkit-mask-image:linear-gradient(180deg,#000 0 40%,transparent 64%); mask-image:linear-gradient(180deg,#000 0 40%,transparent 64%); }
+    .scrim { background: linear-gradient(100deg, #000 26%, rgba(0,0,0,.74) 50%, rgba(0,0,0,.18) 76%, transparent 92%); }
+  }
+  @media (max-width:599px) {
+    .bg video, .bg2 video { object-position:78% top; }
+    .bg2 { display:block; -webkit-mask-image:linear-gradient(180deg,transparent 10%,#000 60%); mask-image:linear-gradient(180deg,transparent 10%,#000 60%); }
+    .scrim { background: linear-gradient(180deg, rgba(0,0,0,.10) 0%, rgba(0,0,0,.50) 24%, rgba(0,0,0,.86) 42%, #000 66%); }
+  }
+
+  /* ---------------- frame / layout ---------------- */
+  .frame {
+    position: relative;
+    z-index: 4;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header.top {
+    position: relative;
+    height: calc(120 * var(--s));
+    flex: 0 0 auto;
+  }
+
+  .brand {
+    position: absolute;
+    left: calc(var(--bx) * var(--s));
+    top: calc(var(--by) * var(--s));
+    display: flex;
+    align-items: center;
+    gap: calc(14 * var(--s));
+  }
+  .brand svg { width: calc(var(--bs) * 1.02); height: calc(var(--bs) * 1.02); display: block; }
+  .brand .wordwrap { display: flex; flex-direction: column; line-height: 1; }
+  .brand .word {
+    font-family: var(--font-sg);
+    font-weight: 700;
+    font-size: calc(21 * var(--s));
+    letter-spacing: -0.02em;
+  }
+  .brand .eyebrow-tiny {
+    font-family: var(--font-jb);
+    font-size: calc(9.5 * var(--s));
+    letter-spacing: .16em;
+    color: var(--muted);
+    margin-top: calc(3 * var(--s));
+  }
+
+  nav.desktop-nav {
+    position: absolute;
+    left: calc(482 * var(--s));
+    top: calc(32 * var(--s));
+    display: flex;
+    gap: calc(38 * var(--s));
+  }
+  nav.desktop-nav a {
+    font-family: var(--font-jb);
+    font-weight: 400;
+    font-size: calc(19.9 * var(--s));
+    color: #fff;
+  }
+  @media (hover:hover) {
+    nav.desktop-nav a:hover { color: var(--red); }
+  }
+
+  .top-cta {
+    position: absolute;
+    right: calc(var(--bx) * var(--s));
+    top: calc(28 * var(--s));
+    display: inline-flex;
+    align-items: center;
+    gap: calc(10 * var(--s));
+    background: var(--red);
+    color: #fff;
+    border: none;
+    height: calc(50 * var(--s));
+    padding: 0 calc(22 * var(--s));
+    font-family: var(--font-jb);
+    font-size: calc(15.5 * var(--s));
+    letter-spacing: .02em;
+    cursor: pointer;
+    clip-path: inset(0 0 0 0);
+  }
+  .top-cta svg { width: calc(16 * var(--s)); height: calc(14 * var(--s)); }
+  @media (hover:hover) {
+    .top-cta:hover { background: var(--red-dark); }
+    .top-cta:hover svg { transform: translateX(3px); }
+  }
+  .top-cta svg { transition: transform .2s ease; }
+
+  @media (max-width:1023px) {
+    nav.desktop-nav, .top-cta { display: none; }
+  }
+
+  /* burger */
+  .burger {
+    position: absolute;
+    right: calc(var(--bx) * var(--s));
+    top: calc(38 * var(--s));
+    width: calc(30 * var(--s));
+    height: calc(22 * var(--s));
+    background: none;
+    border: none;
+    display: none;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 0;
+    cursor: pointer;
+    z-index: 20;
+  }
+  @media (max-width:1023px) { .burger { display: flex; } }
+  .burger span {
+    display: block;
+    height: 2px;
+    background: #fff;
+    transition: transform .3s ease, opacity .3s ease, width .3s ease;
+  }
+  .burger span:nth-child(1) { width: 100%; }
+  .burger span:nth-child(2) { width: 100%; }
+  .burger span:nth-child(3) { width: 62%; }
+  .burger[aria-expanded="true"] span:nth-child(1) { transform: translateY(10px) rotate(45deg); width: 100%; }
+  .burger[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+  .burger[aria-expanded="true"] span:nth-child(3) { transform: translateY(-10px) rotate(-45deg); width: 100%; }
+
+  /* ---------------- hero ---------------- */
+  .spacer { flex: 0 0 auto; }
+  .sp-a { height: calc(var(--sp-a) * var(--s)); }
+  .sp-b { height: calc(var(--sp-b) * var(--s)); }
+  .sp-c { height: calc(var(--sp-c) * var(--s)); }
+
+  .hero {
+    position: relative;
+    flex: 0 0 auto;
+    padding-left: calc(73 * var(--s));
+    padding-right: calc(40 * var(--s));
+  }
+
+  .eyebrow {
+    font-family: var(--font-jb);
+    font-size: calc(13 * var(--s));
+    letter-spacing: .22em;
+    color: var(--muted);
+    margin: 0 0 calc(18 * var(--s));
+  }
+
+  h1 {
+    margin: 0;
+    font-family: var(--font-sg);
+    font-weight: 700;
+    font-size: calc(68.7 * var(--s));
+    line-height: calc(76 * var(--s));
+    letter-spacing: -0.035em;
+    max-width: calc(760 * var(--s));
+  }
+  h1 .ln { display: block; overflow: hidden; }
+  h1 .ln span { display: block; will-change: transform; }
+
+  .subcopy {
+    margin: calc(26 * var(--s)) 0 0;
+    max-width: calc(560 * var(--s));
+    font-family: var(--font-jb);
+    font-size: calc(18.7 * var(--s));
+    line-height: calc(26 * var(--s));
+    letter-spacing: -0.01em;
+    color: var(--sub);
+  }
+
+  .cta-row {
+    display: flex;
+    align-items: center;
+    gap: calc(34 * var(--s));
+    margin-top: calc(38 * var(--s));
+  }
+
+  .hero-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: calc(12 * var(--s));
+    width: calc(212 * var(--s));
+    height: calc(58 * var(--s));
+    background: var(--red);
+    color: #fff;
+    border: none;
+    font-family: var(--font-jb);
+    font-size: calc(16.5 * var(--s));
+    letter-spacing: .02em;
+    cursor: pointer;
+  }
+  .hero-cta svg { width: calc(18 * var(--s)); height: calc(16 * var(--s)); transition: transform .2s ease; }
+  @media (hover:hover) {
+    .hero-cta:hover { background: var(--red-dark); }
+    .hero-cta:hover svg { transform: translateX(3px); }
+  }
+
+  .secondary-link {
+    font-family: var(--font-jb);
+    font-size: calc(15.5 * var(--s));
+    color: #fff;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: calc(3 * var(--s));
+  }
+  @media (hover:hover) {
+    .secondary-link:hover { color: var(--red); border-color: var(--red); }
+  }
+
+  /* ---------------- stats ---------------- */
+  .stats {
+    display: flex;
+    align-items: stretch;
+    gap: calc(34 * var(--s));
+    padding-left: calc(73 * var(--s));
+    padding-right: calc(40 * var(--s));
+  }
+  .stat { display: flex; flex-direction: column; justify-content: center; }
+  .stat .num {
+    font-family: var(--font-jb);
+    font-size: calc(33.45 * var(--s));
+    letter-spacing: -0.01em;
+    color: #fff;
+  }
+  .stat .lab {
+    margin-top: calc(8 * var(--s));
+    font-family: var(--font-sg);
+    font-weight: 500;
+    font-size: calc(13.5 * var(--s));
+    letter-spacing: .1em;
+    color: var(--muted);
+  }
+  .rule {
+    width: 1.5px;
+    background: linear-gradient(180deg, rgba(255,255,255,.085), rgba(255,255,255,.21) 50%, rgba(255,255,255,.085));
+  }
+
+  @media (max-width:599px) {
+    .stats { flex-wrap: wrap; row-gap: calc(22 * var(--s)); }
+    .rule:nth-of-type(2) { display: none; }
+  }
+
+  /* ---------------- scrollable content sections ---------------- */
+  .site-section {
+    position:relative; z-index:5; min-height:100vh;
+    padding:calc(150 * var(--s)) calc(73 * var(--s)) calc(120 * var(--s));
+    background:#000;
+    border-top:1px solid rgba(255,255,255,.10);
+  }
+  .site-section::before {
+    content:""; position:absolute; inset:0; pointer-events:none; opacity:.16;
+    background:linear-gradient(90deg, transparent 0 58%, rgba(200,27,28,.12) 78%, transparent 100%);
+  }
+  .section-kicker {
+    position:relative; font-family:var(--font-jb); font-size:calc(12 * var(--s));
+    letter-spacing:.20em; color:var(--red); margin:0 0 calc(18 * var(--s));
+  }
+  .site-section h2 {
+    position:relative; max-width:calc(900 * var(--s)); margin:0;
+    font-family:var(--font-sg); font-size:clamp(42px, calc(62 * var(--s)), 82px);
+    line-height:1.02; letter-spacing:-.04em; font-weight:700;
+  }
+  .section-intro {
+    position:relative; max-width:calc(720 * var(--s)); margin:calc(28 * var(--s)) 0 0;
+    font-family:var(--font-jb); font-size:calc(17 * var(--s)); line-height:1.7; color:var(--sub);
+  }
+  .protocol-flow {
+    position:relative; display:grid; grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:1px; margin-top:calc(70 * var(--s)); border:1px solid rgba(255,255,255,.12);
+  }
+  .flow-step { padding:calc(28 * var(--s)); min-height:calc(150 * var(--s)); border-right:1px solid rgba(255,255,255,.10); }
+  .flow-step:last-child { border-right:0; }
+  .flow-no { font-family:var(--font-jb); color:var(--red); font-size:calc(12 * var(--s)); }
+  .flow-step strong { display:block; margin-top:calc(18 * var(--s)); font-family:var(--font-sg); font-size:calc(21 * var(--s)); }
+  .flow-step span { display:block; margin-top:calc(9 * var(--s)); font-family:var(--font-jb); font-size:calc(12 * var(--s)); line-height:1.6; color:var(--muted); }
+  .security-grid { position:relative; display:grid; grid-template-columns:repeat(3,1fr); gap:calc(42 * var(--s)) calc(60 * var(--s)); margin-top:calc(70 * var(--s)); max-width:calc(1100 * var(--s)); }
+  .security-item { border-top:1px solid rgba(255,255,255,.18); padding-top:calc(20 * var(--s)); }
+  .security-item b { font-family:var(--font-sg); font-size:calc(23 * var(--s)); }
+  .security-item p { font-family:var(--font-jb); color:var(--muted); font-size:calc(13 * var(--s)); line-height:1.7; margin:calc(10 * var(--s)) 0 0; }
+  .demo-terminal { position:relative; margin-top:calc(65 * var(--s)); max-width:calc(900 * var(--s)); border-top:1px solid rgba(255,255,255,.18); }
+  .demo-line { display:flex; justify-content:space-between; gap:20px; padding:calc(18 * var(--s)) 0; border-bottom:1px solid rgba(255,255,255,.10); font-family:var(--font-jb); font-size:calc(13 * var(--s)); }
+  .demo-line .state { color:var(--muted); }
+  .demo-line.active .state { color:var(--red); }
+  .demo-line.done .state { color:#fff; }
+  @media (max-width:800px) {
+    .protocol-flow { grid-template-columns:1fr 1fr; }
+    .flow-step:nth-child(2) { border-right:0; }
+    .security-grid { grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width:599px) {
+    .site-section { padding:calc(105 * var(--s)) calc(26 * var(--s)) calc(90 * var(--s)); }
+    .site-section h2 { font-size:calc(39 * var(--s)); }
+    .section-intro { font-size:calc(13.5 * var(--s)); }
+    .protocol-flow, .security-grid { grid-template-columns:1fr; }
+    .flow-step { border-right:0; border-bottom:1px solid rgba(255,255,255,.10); }
+    .flow-step:last-child { border-bottom:0; }
+    .security-grid { gap:calc(30 * var(--s)); }
+  }
+
+  /* ---------------- mobile menu ---------------- */
+  #menu {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 50;
+    display: none;
+    flex-direction: column;
+    padding: calc(30 * var(--s)) calc(var(--bx) * var(--s));
+    overflow-y: auto;
+  }
+  #menu.open { display: flex; }
+
+  .menu-top-rule {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--red);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  #menu.open .menu-top-rule { animation: ruleIn .5s cubic-bezier(.16,1,.3,1) forwards; }
+  @keyframes ruleIn { to { transform: scaleX(1); } }
+
+  .menu-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .menu-close {
+    background: none; border: none; color: #fff; cursor: pointer;
+    width: calc(30 * var(--s)); height: calc(22 * var(--s));
+    position: relative;
+  }
+  .menu-close span {
+    position: absolute; left: 0; top: 50%; width: 100%; height: 2px; background: #fff;
+  }
+  .menu-close span:nth-child(1) { transform: translateY(-50%) rotate(45deg); }
+  .menu-close span:nth-child(2) { transform: translateY(-50%) rotate(-45deg); }
+
+  .menu-eyebrow {
+    margin-top: calc(46 * var(--s));
+    font-family: var(--font-jb);
+    font-size: calc(12.5 * var(--s));
+    letter-spacing: .22em;
+    color: var(--muted);
+    opacity: 0;
+  }
+  #menu.open .menu-eyebrow { animation: rowUp .5s .08s cubic-bezier(.22,1,.36,1) forwards; }
+
+  .menu-nav { margin-top: calc(20 * var(--s)); display: flex; flex-direction: column; }
+  .menu-row {
+    border-top: 1px solid var(--line);
+    opacity: 0;
+  }
+  .menu-row:last-child { border-bottom: 1px solid var(--line); }
+  .menu-row a, .menu-row .acc-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    padding: calc(18 * var(--s)) 0;
+    font-family: var(--font-sg);
+    font-weight: 600;
+    font-size: calc(28 * var(--s));
+    letter-spacing: -0.01em;
+    color: #fff;
+  }
+  .menu-row .acc-btn .chev { font-family: var(--font-jb); font-size: calc(16 * var(--s)); color: var(--muted); transition: transform .25s ease; }
+  .menu-row .acc-btn[aria-expanded="true"] .chev { transform: rotate(45deg); color: var(--red); }
+  #menu.open .menu-row:nth-child(1) { animation: rowUp .55s .14s cubic-bezier(.22,1,.36,1) forwards; }
+  #menu.open .menu-row:nth-child(2) { animation: rowUp .55s .20s cubic-bezier(.22,1,.36,1) forwards; }
+  #menu.open .menu-row:nth-child(3) { animation: rowUp .55s .26s cubic-bezier(.22,1,.36,1) forwards; }
+  #menu.open .menu-row:nth-child(4) { animation: rowUp .55s .32s cubic-bezier(.22,1,.36,1) forwards; }
+  #menu.open .menu-row:nth-child(5) { animation: rowUp .55s .38s cubic-bezier(.22,1,.36,1) forwards; }
+  @keyframes rowUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+  .sub-panel {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height .35s ease;
+  }
+  .sub-panel.open { max-height: 300px; }
+  .sub-panel a {
+    display: block;
+    padding: calc(10 * var(--s)) 0 calc(10 * var(--s)) calc(4 * var(--s));
+    font-family: var(--font-jb);
+    font-size: calc(15 * var(--s));
+    color: var(--muted);
+  }
+  @media (hover:hover) { .sub-panel a:hover { color: #fff; } .menu-row a:hover, .menu-row .acc-btn:hover { color: var(--red); } }
+
+  .menu-footer { margin-top: auto; padding-top: calc(30 * var(--s)); }
+  .menu-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(10 * var(--s));
+    background: var(--red);
+    color: #fff;
+    border: none;
+    height: calc(54 * var(--s));
+    padding: 0 calc(22 * var(--s));
+    font-family: var(--font-jb);
+    font-size: calc(15.5 * var(--s));
+    cursor: pointer;
+  }
+  .menu-tags {
+    margin-top: calc(22 * var(--s));
+    font-family: var(--font-jb);
+    font-size: calc(11 * var(--s));
+    letter-spacing: .16em;
+    color: var(--muted);
+    line-height: 1.9;
+  }
+
+  @media (max-width:1023px) and (min-width: 600px) { .menu-row a, .menu-row .acc-btn { font-size: calc(24 * var(--s)); } }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+
+  /* ---------------- original one-shot entrance choreography ---------------- */
+  html.intro .brand,
+  html.intro .desktop-nav a,
+  html.intro .burger,
+  html.intro .subcopy,
+  html.intro .secondary-link,
+  html.intro .stat .num,
+  html.intro .stat .lab { opacity:0; }
+  html.intro .brand { transform:scale(.9); }
+  html.intro .desktop-nav a { transform:translateY(7px); }
+  html.intro .subcopy { transform:translateY(14px); }
+  html.intro .stat .num { transform:translateY(12px); }
+  html.intro .stat .lab { transform:translateY(10px); }
+  html.intro .rule { transform:scaleY(0); transform-origin:center; }
+  html.intro .top-cta, html.intro .hero-cta { clip-path:inset(0 100% 0 0); }
+  html.intro h1 .ln { overflow:hidden; padding-bottom:6px; margin-bottom:-6px; }
+  html.intro h1 .ln > span { transform:translateY(120%); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+<svg class="svgdefs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+<filter id="grade" color-interpolation-filters="sRGB"><feComponentTransfer><feFuncR type="gamma" amplitude="0.95" exponent="1.08" offset="0"/><feFuncG type="gamma" amplitude="0.78" exponent="1.12" offset="0"/><feFuncB type="gamma" amplitude="0.78" exponent="1.12" offset="0"/></feComponentTransfer></filter>
+<filter id="grade2" color-interpolation-filters="sRGB"><feComponentTransfer><feFuncR type="gamma" amplitude="0.78" exponent="1.12" offset="0"/><feFuncG type="gamma" amplitude="0.62" exponent="1.16" offset="0"/><feFuncB type="gamma" amplitude="0.62" exponent="1.16" offset="0"/></feComponentTransfer></filter>
+</defs></svg>
+</head>
+<body>
+
+<div class="screen" id="home">
+
+  <!-- Original cinematic video plates — kept separate from the 3D scene -->
+  <div class="bg" aria-hidden="true"><video id="bgVideo" autoplay muted loop playsinline preload="auto" src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260809_132544_b6ef0174-ed95-45ad-9a2f-ccb8acfbdce8.mp4"></video></div>
+  <div class="bg2" aria-hidden="true"><video id="bgVideo2" autoplay muted loop playsinline preload="auto" src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260809_132544_b6ef0174-ed95-45ad-9a2f-ccb8acfbdce8.mp4"></video></div>
+
+  <!-- 3D / fallback layer -->
+  <div class="scene" id="scene" aria-hidden="true">
+    <div class="scene-fallback" id="sceneFallback">
+      <svg viewBox="0 0 600 500" xmlns="http://www.w3.org/2000/svg">
+        <g fill="none" stroke="#3a3a3a" stroke-width="1">
+          <line x1="300" y1="250" x2="300" y2="60"/>
+          <line x1="300" y1="250" x2="470" y2="150"/>
+          <line x1="300" y1="250" x2="470" y2="350"/>
+          <line x1="300" y1="250" x2="140" y2="360"/>
+          <line x1="300" y1="250" x2="150" y2="120"/>
+        </g>
+        <g fill="#000" stroke="#fff" stroke-width="2">
+          <circle cx="300" cy="60" r="8"/>
+          <circle cx="470" cy="150" r="8"/>
+          <circle cx="470" cy="350" r="8"/>
+          <circle cx="140" cy="360" r="8"/>
+          <circle cx="150" cy="120" r="8"/>
+        </g>
+        <circle cx="300" cy="250" r="26" fill="#000" stroke="#c81b1c" stroke-width="2"/>
+        <circle cx="300" cy="250" r="10" fill="#c81b1c" opacity=".5"/>
+      </svg>
+    </div>
+    <div class="hud-label" id="hudLabel"></div>
+    <div class="node-readout" id="nodeReadout"></div>
+  </div>
+
+  <div class="scrim"></div>
+
+  <div class="frame">
+
+    <header class="top">
+      <div class="brand">
+        <svg viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <polyline points="18,7 23,13 28,7" stroke="#fff" stroke-width="3" stroke-linecap="butt" stroke-linejoin="miter"/>
+          <polyline points="18,39 23,33 28,39" stroke="#fff" stroke-width="3" stroke-linecap="butt" stroke-linejoin="miter"/>
+          <polyline points="7,18 13,23 7,28" stroke="#fff" stroke-width="3" stroke-linecap="butt" stroke-linejoin="miter"/>
+          <polyline points="39,18 33,23 39,28" stroke="#fff" stroke-width="3" stroke-linecap="butt" stroke-linejoin="miter"/>
+          <rect x="18.5" y="18.5" width="9" height="9" stroke="#fff" stroke-width="3"/>
+        </svg>
+        <div class="wordwrap">
+          <span class="word">DeadDrop</span>
+          <span class="eyebrow-tiny">RECOVERY PROTOCOL</span>
+        </div>
+      </div>
+
+      <nav class="desktop-nav" aria-label="Primary">
+        <a href="#home">Home</a>
+        <a href="#protocol">Protocol</a>
+        <a href="#security">Security</a>
+        <a href="#demo">Demo</a>
+      </nav>
+
+      <a class="top-cta" href="#protocol">
+        Explore protocol
+        <svg viewBox="0 0 21 18" fill="none"><path d="M0 9H20.1M12.1 1L20.1 9L12.1 17" stroke="#fff" stroke-width="2"/></svg>
+      </a>
+
+      <button class="burger" id="burgerBtn" aria-expanded="false" aria-controls="menu" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
+    </header>
+
+    <div class="spacer sp-a"></div>
+
+    <section class="hero">
+      <p class="eyebrow">PUBLICLY VERIFIABLE EMERGENCY RECOVERY</p>
+      <h1>
+        <span class="ln"><span>Emergency recovery</span></span>
+        <span class="ln"><span>without a single point of trust.</span></span>
+      </h1>
+      <p class="subcopy">Publicly verifiable, policy-composable recovery for critical secrets — combining governance quorum, cryptographic quorum, and client-side reconstruction.</p>
+      <div class="cta-row">
+        <a class="hero-cta" href="#protocol">
+          Explore DeadDrop
+          <svg viewBox="0 0 21 18" fill="none"><path d="M0 9H20.1M12.1 1L20.1 9L12.1 17" stroke="#fff" stroke-width="2"/></svg>
+        </a>
+        <a class="secondary-link" href="#protocol">View architecture →</a>
+      </div>
+    </section>
+
+    <div class="spacer sp-b"></div>
+
+    <section class="stats" aria-label="Protocol demonstration parameters">
+      <div class="stat"><span class="num">3 / 5</span><span class="lab">THRESHOLD</span></div>
+      <div class="rule"></div>
+      <div class="stat"><span class="num">2</span><span class="lab">QUORUM LAYERS</span></div>
+      <div class="rule"></div>
+      <div class="stat"><span class="num">0</span><span class="lab">PLAINTEXT ON-CHAIN</span></div>
+      <div class="rule"></div>
+      <div class="stat"><span class="num">E4</span><span class="lab">REFRESH EPOCH</span></div>
+    </section>
+
+    <div class="spacer sp-c"></div>
+  </div>
+
+  <main>
+    <section class="site-section" id="protocol">
+      <p class="section-kicker">01 / PROTOCOL</p>
+      <h2>Recovery authorization is separated from cryptographic possession.</h2>
+      <p class="section-intro">DeadDrop combines governance quorum, cryptographic quorum, and blockchain-verifiable policy enforcement while keeping plaintext secrets and reconstruction off-chain.</p>
+      <div class="protocol-flow">
+        <div class="flow-step"><span class="flow-no">01</span><strong>Encrypted Secret</strong><span>A trusted client encrypts the critical payload before recovery policy is applied.</span></div>
+        <div class="flow-step"><span class="flow-no">02</span><strong>Secret Sharing</strong><span>The secret is split into trustee-specific cryptographic shares.</span></div>
+        <div class="flow-step"><span class="flow-no">03</span><strong>Policy Verification</strong><span>Trustee approvals are checked against the registered recovery policy.</span></div>
+        <div class="flow-step"><span class="flow-no">04</span><strong>Client Reconstruction</strong><span>Valid released shares are reconstructed and decrypted locally.</span></div>
+      </div>
+    </section>
+
+    <section class="site-section" id="security">
+      <p class="section-kicker">02 / SECURITY</p>
+      <h2>Multiple controls. One verifiable recovery path.</h2>
+      <p class="section-intro">The protocol is designed so that authorization, share validity, and recovery history can be checked independently instead of relying on one privileged backend.</p>
+      <div class="security-grid">
+        <article class="security-item"><b>Dual Quorum</b><p>Governance approval and cryptographic share requirements work together.</p></article>
+        <article class="security-item"><b>Share Commitments</b><p>Committed share values provide a consistency check before reconstruction.</p></article>
+        <article class="security-item"><b>Refresh Epochs</b><p>Share refresh cycles can preserve the secret while changing the distributed shares.</p></article>
+        <article class="security-item"><b>Client-Side Recovery</b><p>Plaintext reconstruction stays on the recovery client rather than the backend.</p></article>
+        <article class="security-item"><b>Failure Domains</b><p>Trustee placement can account for correlated operational failure.</p></article>
+        <article class="security-item"><b>Verifiable History</b><p>Policy decisions and recovery evidence are anchored to an auditable ledger.</p></article>
+      </div>
+    </section>
+
+    <section class="site-section" id="demo">
+      <p class="section-kicker">03 / DEMO</p>
+      <h2>Watch a recovery request move through the policy.</h2>
+      <p class="section-intro">A simulated recovery demonstrates the intended sequence without exposing plaintext or pretending the demo is a production recovery event.</p>
+      <div class="demo-terminal" id="demoTerminal">
+        <div class="demo-line"><span>REQUEST CREATED</span><span class="state">WAITING</span></div>
+        <div class="demo-line"><span>POLICY CHECKED</span><span class="state">WAITING</span></div>
+        <div class="demo-line"><span>TRUSTEE 01 — APPROVED</span><span class="state">WAITING</span></div>
+        <div class="demo-line"><span>TRUSTEE 02 — APPROVED</span><span class="state">WAITING</span></div>
+        <div class="demo-line"><span>TRUSTEE 03 — APPROVED</span><span class="state">WAITING</span></div>
+        <div class="demo-line"><span>QUORUM SATISFIED</span><span class="state">WAITING</span></div>
+        <div class="demo-line"><span>BLOCKCHAIN EVENT VERIFIED</span><span class="state">WAITING</span></div>
+        <div class="demo-line"><span>SHARES RELEASED</span><span class="state">WAITING</span></div>
+        <div class="demo-line"><span>CLIENT RECONSTRUCTION</span><span class="state">WAITING</span></div>
+        <div class="demo-line"><span>RECOVERY AUTHORIZED</span><span class="state">WAITING</span></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Mobile fullscreen menu -->
+  <div id="menu" role="dialog" aria-modal="true" aria-label="Site menu">
+    <div class="menu-top-rule"></div>
+    <div class="menu-header">
+      <span class="eyebrow-tiny" style="font-family:var(--font-jb);letter-spacing:.16em;color:var(--muted);">DEADDROP</span>
+      <button class="menu-close" id="menuCloseBtn" aria-label="Close menu"><span></span><span></span></button>
+    </div>
+
+    <p class="menu-eyebrow">MENU</p>
+
+    <nav class="menu-nav" aria-label="Mobile">
+      <div class="menu-row"><a href="#home">Home</a></div>
+
+      <div class="menu-row">
+        <button class="acc-btn" aria-expanded="false" aria-controls="panel-protocol">Protocol <span class="chev">+</span></button>
+        <div class="sub-panel" id="panel-protocol">
+          <a href="#protocol">Architecture</a>
+          <a href="#protocol">Dual Quorum</a>
+          <a href="#protocol">Access Structures</a>
+        </div>
+      </div>
+
+      <div class="menu-row">
+        <button class="acc-btn" aria-expanded="false" aria-controls="panel-security">Security <span class="chev">+</span></button>
+        <div class="sub-panel" id="panel-security">
+          <a href="#security">Threat Model</a>
+          <a href="#security">Share Readiness</a>
+          <a href="#security">Refresh Epochs</a>
+        </div>
+      </div>
+
+      <div class="menu-row"><a href="#demo">Demo</a></div>
+      <div class="menu-row"><a href="#github">GitHub</a></div>
+    </nav>
+
+    <div class="menu-footer">
+      <a class="menu-cta" href="#protocol">
+        Explore protocol
+        <svg viewBox="0 0 21 18" fill="none" width="16" height="14"><path d="M0 9H20.1M12.1 1L20.1 9L12.1 17" stroke="#fff" stroke-width="2"/></svg>
+      </a>
+      <p class="menu-tags">PUBLICLY VERIFIABLE<br>POLICY-COMPOSABLE<br>EMERGENCY RECOVERY</p>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* Original three-plate video synchronization. */
+  var videos = [document.getElementById('bgVideo'), document.getElementById('bgVideo2')].filter(Boolean);
+  if (reducedMotion) { videos.forEach(function(v){ v.removeAttribute('autoplay'); v.pause(); }); }
+  if (!reducedMotion && videos.length > 1) {
+    videos[0].addEventListener('timeupdate', function(){
+      var master = videos[0];
+      videos.slice(1).forEach(function(v){ if (Math.abs(v.currentTime-master.currentTime) > .12) { try { v.currentTime=master.currentTime; } catch(e){} } });
+    });
+  }
+
+
+
+  /* ============================================================
+     MOBILE MENU
+  ============================================================ */
+  var burgerBtn = document.getElementById('burgerBtn');
+  var menu = document.getElementById('menu');
+  var menuCloseBtn = document.getElementById('menuCloseBtn');
+
+  function openMenu() {
+    menu.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    burgerBtn.setAttribute('aria-expanded', 'true');
+    burgerBtn.setAttribute('aria-label', 'Close menu');
+    document.addEventListener('keydown', onMenuKeydown);
+  }
+  function closeMenu() {
+    menu.classList.remove('open');
+    document.body.style.overflow = '';
+    burgerBtn.setAttribute('aria-expanded', 'false');
+    burgerBtn.setAttribute('aria-label', 'Open menu');
+    document.removeEventListener('keydown', onMenuKeydown);
+  }
+  function onMenuKeydown(e) {
+    if (e.key === 'Escape') closeMenu();
+  }
+  burgerBtn.addEventListener('click', function () {
+    if (menu.classList.contains('open')) closeMenu(); else openMenu();
+  });
+  menuCloseBtn.addEventListener('click', closeMenu);
+  menu.querySelectorAll('.menu-row > a, .menu-cta').forEach(function (a) {
+    a.addEventListener('click', closeMenu);
+  });
+  window.addEventListener('resize', function () {
+    if (window.innerWidth > 1023 && menu.classList.contains('open')) closeMenu();
+  });
+
+  /* Accordion — only one open at a time */
+  var accButtons = Array.prototype.slice.call(document.querySelectorAll('.acc-btn'));
+  accButtons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var panel = document.getElementById(btn.getAttribute('aria-controls'));
+      var isOpen = btn.getAttribute('aria-expanded') === 'true';
+      accButtons.forEach(function (other) {
+        other.setAttribute('aria-expanded', 'false');
+        document.getElementById(other.getAttribute('aria-controls')).classList.remove('open');
+        other.querySelector('.chev').textContent = '+';
+      });
+      if (!isOpen) {
+        btn.setAttribute('aria-expanded', 'true');
+        panel.classList.add('open');
+        btn.querySelector('.chev').textContent = '+';
+      }
+    });
+  });
+
+  /* ============================================================
+     ENTRANCE CHOREOGRAPHY (Web Animations API)
+  ============================================================ */
+  function runEntrance() {
+    if (reducedMotion || !document.documentElement.classList.contains('intro') || !Element.prototype.animate) {
+      document.documentElement.classList.remove('intro');
+      return;
+    }
+
+    var EXPO = 'cubic-bezier(.16,1,.3,1)';
+    var QUINT = 'cubic-bezier(.22,1,.36,1)';
+    var QUART = 'cubic-bezier(.25,1,.5,1)';
+    var TYPE = 'cubic-bezier(.22,.85,.24,1)';
+
+    var isPhone = window.innerWidth <= 599;
+    var mul = isPhone ? 0.86 : 1;
+    var anims = [];
+
+    function play(el, keyframes, delay, duration, easing) {
+      if (!el) return;
+      anims.push(el.animate(keyframes, {
+        delay: delay * mul * 1000,
+        duration: duration * mul * 1000,
+        easing: easing,
+        fill: 'forwards'
+      }));
+    }
+
+    play(document.querySelector('.brand'),
+      [{ opacity: 0, transform: 'scale(.9)' }, { opacity: 1, transform: 'scale(1)' }],
+      0.00, 0.70, EXPO);
+
+    var navLinks = document.querySelectorAll('nav.desktop-nav a');
+    navLinks.forEach(function (el, i) {
+      play(el, [{ opacity: 0, transform: 'translateY(7px)' }, { opacity: 1, transform: 'translateY(0)' }],
+        0.12 + i * 0.055, 0.62, QUINT);
+    });
+
+    play(burgerBtn, [{ opacity: 0 }, { opacity: 1 }], 0.18, 0.55, QUART);
+
+    play(document.querySelector('.top-cta'),
+      [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)' }],
+      0.28, 0.66, EXPO);
+
+    var headlineSpans = document.querySelectorAll('h1 .ln > span');
+    headlineSpans.forEach(function (el, i) {
+      play(el, [{ transform: 'translateY(120%)' }, { transform: 'translateY(0)' }],
+        0.34 + i * 0.09, 0.98, TYPE);
+    });
+
+    play(document.querySelector('.subcopy'),
+      [{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'translateY(0)' }],
+      0.74, 0.72, QUINT);
+
+    play(document.querySelector('.hero-cta'),
+      [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)' }],
+      0.90, 0.70, EXPO);
+
+    play(document.querySelector('.secondary-link'),
+      [{ opacity: 0 }, { opacity: 1 }], 0.95, 0.5, QUINT);
+
+    var rules = document.querySelectorAll('.rule');
+    rules.forEach(function (el, i) {
+      play(el, [{ transform: 'scaleY(0)' }, { transform: 'scaleY(1)' }], 0.98 + i * 0.07, 0.60, QUART);
+    });
+
+    var nums = document.querySelectorAll('.stat .num');
+    nums.forEach(function (el, i) {
+      play(el, [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'translateY(0)' }],
+        1.04 + i * 0.085, 0.66, QUINT);
+    });
+
+    var labs = document.querySelectorAll('.stat .lab');
+    labs.forEach(function (el, i) {
+      play(el, [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'translateY(0)' }],
+        1.10 + i * 0.085, 0.62, QUINT);
+    });
+
+    var finished = anims.map(function (a) { return a.finished.catch(function () {}); });
+    Promise.all(finished).then(function () {
+      document.documentElement.classList.remove('intro');
+    });
+    /* Hard safety deadline */
+    setTimeout(function () {
+      document.documentElement.classList.remove('intro');
+    }, 4000);
+  }
+
+  var started = false;
+  function startOnce() {
+    if (started) return;
+    started = true;
+    requestAnimationFrame(runEntrance);
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(startOnce).catch(startOnce);
+  }
+  setTimeout(startOnce, 1000);
+
+  /* ============================================================
+     3D DEADDROP RECOVERY NETWORK
+  ============================================================ */
+  var sceneEl = document.getElementById('scene');
+  var fallbackEl = document.getElementById('sceneFallback');
+  var hudLabelEl = document.getElementById('hudLabel');
+  var nodeReadoutEl = document.getElementById('nodeReadout');
+
+  function webglAvailable() {
+    try {
+      var c = document.createElement('canvas');
+      return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl')));
+    } catch (e) { return false; }
+  }
+
+  function showFallback() {
+    fallbackEl.classList.add('active');
+  }
+
+  if (typeof THREE === 'undefined' || !webglAvailable()) {
+    showFallback();
+  } else {
+    try {
+      initScene();
+    } catch (err) {
+      showFallback();
+    }
+  }
+
+  function initScene() {
+    var width = window.innerWidth, height = window.innerHeight;
+
+    var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(width, height);
+    sceneEl.insertBefore(renderer.domElement, sceneEl.firstChild);
+
+    var scene = new THREE.Scene();
+    var camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 100);
+    camera.position.set(0, 0, 7.2);
+
+    /* World group shifted right so the network sits in the visual
+       right-hand zone while the canvas still spans the full viewport. */
+    var world = new THREE.Group();
+    world.position.set(1.85, 0.05, 0);
+    scene.add(world);
+
+    var isMobile = width <= 640;
+    var isReduced = reducedMotion;
+
+    /* ---------- Recovery Core ---------- */
+    var core = new THREE.Group();
+    world.add(core);
+
+    var outerGeo = new THREE.IcosahedronGeometry(1.05, 1);
+    var outerEdges = new THREE.EdgesGeometry(outerGeo);
+    var outerLines = new THREE.LineSegments(outerEdges, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.28 }));
+    core.add(outerLines);
+
+    var innerGeo = new THREE.OctahedronGeometry(0.56, 0);
+    var innerEdges = new THREE.EdgesGeometry(innerGeo);
+    var innerLines = new THREE.LineSegments(innerEdges, new THREE.LineBasicMaterial({ color: 0xc81b1c, transparent: true, opacity: 0.55 }));
+    core.add(innerLines);
+
+    var glowGeo = new THREE.SphereGeometry(0.22, 16, 16);
+    var glowMat = new THREE.MeshBasicMaterial({ color: 0xc81b1c, transparent: true, opacity: 0.35 });
+    var glow = new THREE.Mesh(glowGeo, glowMat);
+    core.add(glow);
+
+    /* ---------- Trustee nodes ---------- */
+    var TRUSTEE_COUNT = 5;
+    var trustees = [];
+    var trusteeLabels = ['TRUSTEE 01', 'TRUSTEE 02', 'TRUSTEE 03', 'TRUSTEE 04', 'TRUSTEE 05'];
+    var connectionLines = [];
+
+    for (var i = 0; i < TRUSTEE_COUNT; i++) {
+      var angle = (i / TRUSTEE_COUNT) * Math.PI * 2;
+      var radius = 2.5 + (i % 2 === 0 ? 0.15 : -0.1);
+      var baseX = Math.cos(angle) * radius;
+      var baseY = Math.sin(angle) * radius * 0.62 + (i % 2 === 0 ? 0.35 : -0.25);
+      var baseZ = Math.sin(angle * 1.3) * 1.1;
+
+      var nodeGroup = new THREE.Group();
+      nodeGroup.position.set(baseX, baseY, baseZ);
+      nodeGroup.userData.baseAngle = angle;
+      nodeGroup.userData.baseRadius = radius;
+      nodeGroup.userData.baseY = baseY;
+      nodeGroup.userData.baseZ = baseZ;
+      nodeGroup.userData.orbitSpeed = 0.04 + i * 0.006;
+      nodeGroup.userData.label = trusteeLabels[i];
+      nodeGroup.userData.index = i;
+
+      var shardGeo = new THREE.OctahedronGeometry(0.16, 0);
+      var shardEdges = new THREE.EdgesGeometry(shardGeo);
+      var shardMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 });
+      var shard = new THREE.LineSegments(shardEdges, shardMat);
+      nodeGroup.add(shard);
+
+      var dotGeo = new THREE.SphereGeometry(0.045, 8, 8);
+      var dotMat = new THREE.MeshBasicMaterial({ color: 0xc81b1c, transparent: true, opacity: 0.85 });
+      var dot = new THREE.Mesh(dotGeo, dotMat);
+      nodeGroup.add(dot);
+
+      /* invisible larger hit-sphere for easier hover/raycast */
+      var hitGeo = new THREE.SphereGeometry(0.34, 8, 8);
+      var hitMat = new THREE.MeshBasicMaterial({ visible: false });
+      var hitSphere = new THREE.Mesh(hitGeo, hitMat);
+      nodeGroup.add(hitSphere);
+      hitSphere.userData.nodeGroup = nodeGroup;
+
+      nodeGroup.userData.shardMat = shardMat;
+      nodeGroup.userData.dotMat = dotMat;
+      nodeGroup.userData.hitSphere = hitSphere;
+
+      world.add(nodeGroup);
+      trustees.push(nodeGroup);
+
+      var lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), nodeGroup.position.clone()]);
+      var lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.16 });
+      var line = new THREE.Line(lineGeo, lineMat);
+      line.userData.phase = i * 1.3;
+      world.add(line);
+      connectionLines.push(line);
+    }
+
+    /* ---------- Blockchain ledger layer ---------- */
+    var blockchain = new THREE.Group();
+    blockchain.position.set(0, -2.05, -1.6);
+    world.add(blockchain);
+    var blocks = [];
+    var BLOCK_COUNT = 6;
+    for (var b = 0; b < BLOCK_COUNT; b++) {
+      var blockGeo = new THREE.BoxGeometry(0.34, 0.22, 0.05);
+      var blockEdges = new THREE.EdgesGeometry(blockGeo);
+      var blockMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.14 });
+      var blockMesh = new THREE.LineSegments(blockEdges, blockMat);
+      blockMesh.position.x = (b - (BLOCK_COUNT - 1) / 2) * 0.5;
+      blockMesh.userData.baseOpacity = 0.14;
+      blockchain.add(blockMesh);
+      blocks.push(blockMesh);
+
+      if (b > 0) {
+        var chainGeo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(blockMesh.position.x - 0.5, 0, 0),
+          new THREE.Vector3(blockMesh.position.x - 0.16, 0, 0)
+        ]);
+        var chainMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1 });
+        blockchain.add(new THREE.Line(chainGeo, chainMat));
+      }
+    }
+
+    /* ---------- Ambient particle field ---------- */
+    var particleCount = isMobile ? 90 : 220;
+    var particlePositions = new Float32Array(particleCount * 3);
+    for (var p = 0; p < particleCount; p++) {
+      var r = 3 + Math.random() * 2.6;
+      var theta = Math.random() * Math.PI * 2;
+      var phi = Math.acos((Math.random() * 2) - 1);
+      particlePositions[p * 3] = r * Math.sin(phi) * Math.cos(theta);
+      particlePositions[p * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) * 0.6;
+      particlePositions[p * 3 + 2] = r * Math.cos(phi) * 0.6 - 1;
+    }
+    var particleGeo = new THREE.BufferGeometry();
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+    var particleMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.02, transparent: true, opacity: 0.35 });
+    var particles = new THREE.Points(particleGeo, particleMat);
+    world.add(particles);
+
+    /* ---------- Pointer parallax + hover ---------- */
+    var pointer = new THREE.Vector2(0, 0);
+    var targetRotY = 0, targetRotX = 0;
+    var raycaster = new THREE.Raycaster();
+    var hitSpheres = trustees.map(function (t) { return t.userData.hitSphere; });
+    var hoveredNode = null;
+    var hoverSupported = window.matchMedia && window.matchMedia('(hover:hover)').matches;
+
+    if (hoverSupported && !isReduced) {
+      window.addEventListener('pointermove', function (e) {
+        pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+        pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        targetRotY = pointer.x * 0.18;
+        targetRotX = pointer.y * 0.1;
+      });
+    }
+
+    var readoutStatuses = ['VERIFIED', 'PENDING', 'VERIFIED', 'VERIFIED', 'VERIFIED'];
+
+    function updateHover() {
+      if (!hoverSupported) return;
+      raycaster.setFromCamera(pointer, camera);
+      var intersects = raycaster.intersectObjects(hitSpheres);
+      var newHover = intersects.length ? intersects[0].object.userData.nodeGroup : null;
+
+      if (newHover !== hoveredNode) {
+        if (hoveredNode) {
+          hoveredNode.userData.shardMat.opacity = 0.75;
+          hoveredNode.userData.dotMat.opacity = 0.85;
+        }
+        hoveredNode = newHover;
+        if (hoveredNode) {
+          hoveredNode.userData.shardMat.opacity = 1;
+          hoveredNode.userData.dotMat.opacity = 1;
+          var idx = hoveredNode.userData.index;
+          nodeReadoutEl.innerHTML =
+            '<div>' + hoveredNode.userData.label + '</div>' +
+            '<div><span class="rk">STATUS</span><span class="rv">' + readoutStatuses[idx] + '</span></div>' +
+            '<div><span class="rk">EPOCH</span><span class="rv">04</span></div>' +
+            '<div><span class="rk">COMMITMENT</span><span class="rv">VALID</span></div>' +
+            '<div><span class="rk">ROLE</span><span class="rv">TRUSTEE</span></div>';
+          nodeReadoutEl.style.opacity = '1';
+        } else {
+          nodeReadoutEl.style.opacity = '0';
+        }
+      }
+
+      if (hoveredNode) {
+        var worldPos = new THREE.Vector3();
+        hoveredNode.getWorldPosition(worldPos);
+        var screenPos = worldPos.clone().project(camera);
+        var x = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
+        var y = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
+        nodeReadoutEl.style.left = x + 'px';
+        nodeReadoutEl.style.top = y + 'px';
+      }
+    }
+
+    /* ---------- HUD status label cycling ---------- */
+    var hudPhrases = ['POLICY VERIFIED', 'QUORUM SATISFIED', 'EPOCH 04', 'SHARE VALID', 'RECOVERY AUTHORIZED'];
+    function flashHud(text, x, y, duration) {
+      hudLabelEl.textContent = text;
+      hudLabelEl.style.left = x + 'px';
+      hudLabelEl.style.top = y + 'px';
+      hudLabelEl.style.transition = 'opacity .5s ease';
+      hudLabelEl.style.opacity = '1';
+      setTimeout(function () { hudLabelEl.style.opacity = '0'; }, duration || 1400);
+    }
+
+    function screenPosOf(obj) {
+      var wp = new THREE.Vector3();
+      obj.getWorldPosition(wp);
+      var sp = wp.clone().project(camera);
+      return {
+        x: (sp.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-sp.y * 0.5 + 0.5) * window.innerHeight
+      };
+    }
+
+    /* ---------- Recovery demonstration sequence ---------- */
+    var sequenceRunning = false;
+    function runRecoverySequence() {
+      if (isReduced || sequenceRunning) return;
+      sequenceRunning = true;
+      var order = [0, 1, 2];
+      var step = 0;
+
+      function litUp(idx, on) {
+        var t = trustees[idx];
+        t.userData.dotMat.opacity = on ? 1 : 0.85;
+        t.userData.shardMat.opacity = on ? 1 : 0.75;
+        t.userData.shardMat.color.set(on ? 0xc81b1c : 0xffffff);
+        connectionLines[idx].material.opacity = on ? 0.6 : 0.16;
+        connectionLines[idx].material.color.set(on ? 0xc81b1c : 0xffffff);
+      }
+
+      function next() {
+        if (step < order.length) {
+          var idx = order[step];
+          litUp(idx, true);
+          var pos = screenPosOf(trustees[idx]);
+          flashHud('SHARE VALID', pos.x, pos.y - 26, 1000);
+          step++;
+          setTimeout(next, 650);
+        } else if (step === order.length) {
+          var corePos = screenPosOf(core);
+          flashHud('QUORUM SATISFIED', corePos.x, corePos.y - 70, 1400);
+          step++;
+          setTimeout(next, 1200);
+        } else if (step === order.length + 1) {
+          var bcPos = screenPosOf(blockchain);
+          flashHud('POLICY VERIFIED', bcPos.x, bcPos.y - 30, 1300);
+          blocks.forEach(function (bl) { bl.material.opacity = 0.5; bl.material.color.set(0xc81b1c); });
+          step++;
+          setTimeout(next, 1200);
+        } else if (step === order.length + 2) {
+          glow.material.opacity = 0.85;
+          glow.scale.set(1.6, 1.6, 1.6);
+          innerLines.material.opacity = 1;
+          var corePos2 = screenPosOf(core);
+          flashHud('RECOVERY AUTHORIZED', corePos2.x, corePos2.y - 70, 1600);
+          step++;
+          setTimeout(next, 1600);
+        } else {
+          order.forEach(function (idx) { litUp(idx, false); });
+          blocks.forEach(function (bl) { bl.material.opacity = bl.userData.baseOpacity; bl.material.color.set(0xffffff); });
+          glow.material.opacity = 0.35;
+          glow.scale.set(1, 1, 1);
+          innerLines.material.opacity = 0.55;
+          sequenceRunning = false;
+        }
+      }
+      next();
+    }
+
+    if (!isReduced) {
+      setInterval(function () {
+        if (document.visibilityState === 'visible') runRecoverySequence();
+      }, 15000);
+      setTimeout(runRecoverySequence, 4500);
+    }
+
+    /* ---------- Resize ---------- */
+    window.addEventListener('resize', function () {
+      var w = window.innerWidth, h = window.innerHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    });
+
+    /* ---------- Render loop ---------- */
+    var clock = new THREE.Clock();
+    var currentRotY = 0, currentRotX = 0;
+
+    function animate() {
+      requestAnimationFrame(animate);
+      var t = clock.getElapsedTime();
+
+      if (!isReduced) {
+        core.rotation.y = t * 0.15;
+        core.rotation.x = Math.sin(t * 0.2) * 0.12;
+        core.position.y = Math.sin(t * 0.6) * 0.06;
+        outerLines.rotation.y = -t * 0.08;
+
+        trustees.forEach(function (nodeGroup, idx) {
+          var u = nodeGroup.userData;
+          var a = u.baseAngle + t * u.orbitSpeed;
+          nodeGroup.position.x = Math.cos(a) * u.baseRadius;
+          nodeGroup.position.y = u.baseY + Math.sin(t * 0.4 + idx) * 0.08;
+          nodeGroup.position.z = u.baseZ + Math.sin(a * 1.3) * 0.15;
+          nodeGroup.rotation.y = t * 0.5;
+          nodeGroup.rotation.x = t * 0.3;
+
+          connectionLines[idx].geometry.setFromPoints([new THREE.Vector3(0, 0, 0), nodeGroup.position.clone()]);
+          if (!sequenceRunning) {
+            var pulse = 0.14 + Math.sin(t * 1.2 + connectionLines[idx].userData.phase) * 0.06;
+            connectionLines[idx].material.opacity = Math.max(0.06, pulse);
+          }
+        });
+
+        particles.rotation.y = t * 0.02;
+        blockchain.children.forEach(function (child, idx) {
+          child.position.y = Math.sin(t * 0.3 + idx) * 0.03;
+        });
+
+        currentRotY += (targetRotY - currentRotY) * 0.04;
+        currentRotX += (targetRotX - currentRotX) * 0.04;
+        world.rotation.y = currentRotY * 0.3;
+        world.rotation.x = currentRotX * 0.3;
+
+        updateHover();
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+  }
+
+  /* Scroll-driven recovery log in the Demo section. */
+  var demoTerminal = document.getElementById('demoTerminal');
+  if (demoTerminal && 'IntersectionObserver' in window) {
+    var demoStarted = false;
+    var demoObserver = new IntersectionObserver(function(entries){
+      if (!entries[0].isIntersecting || demoStarted) return;
+      demoStarted = true;
+      var lines = demoTerminal.querySelectorAll('.demo-line');
+      lines.forEach(function(line, i){
+        setTimeout(function(){
+          line.classList.add('active');
+          var state=line.querySelector('.state');
+          if(state) state.textContent='VERIFIED';
+          setTimeout(function(){ line.classList.remove('active'); line.classList.add('done'); }, 420);
+        }, i*420);
+      });
+    }, {threshold:.35});
+    demoObserver.observe(demoTerminal);
+  }
+})();
+</script>
+</body>
+</html>
