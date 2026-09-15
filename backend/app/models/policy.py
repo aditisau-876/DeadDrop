@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -26,9 +26,21 @@ class Policy(Base):
         nullable=True,
     )
 
+    # Example:
+    # (any 3 core trustees AND 1 external auditor)
+    # OR (all 5 trustees)
     policy_expression: Mapped[str] = mapped_column(
         Text,
         nullable=False,
+    )
+
+    # Trustees assigned to this policy.
+    # The full policy/access-structure engine will use
+    # this information later.
+    trustee_ids: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
     )
 
     version: Mapped[int] = mapped_column(

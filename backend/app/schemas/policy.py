@@ -1,13 +1,25 @@
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
 
 class PolicyCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
+    name: str = Field(
+        min_length=1,
+        max_length=120,
+    )
+
     description: str | None = None
-    policy_expression: str = Field(min_length=1)
-    trustee_ids: list[str] = Field(min_length=1)
+
+    policy_expression: str = Field(
+        min_length=1,
+    )
+
+    trustee_ids: list[str] = Field(
+        min_length=1,
+    )
+
     expiry_seconds: int | None = Field(
         default=None,
         gt=0,
