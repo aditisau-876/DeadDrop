@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from shamir_mnemonic import (
-    generate_mnemonics,
     combine_mnemonics,
+    generate_mnemonics,
 )
 
 
@@ -27,18 +27,26 @@ def split_secret(
     threshold: int,
     share_count: int,
 ) -> SharedSecret:
-    """
-    Split a secret into Shamir-based mnemonic shares.
 
-    NOTE:
-    This provides the threshold primitive. DeadDrop's generalized
-    policy engine will sit above this layer.
-    """
     if not secret:
-        raise ValueError("Secret cannot be empty.")
+        raise ValueError(
+            "Secret cannot be empty."
+        )
+
+    if len(secret) < 16:
+        raise ValueError(
+            "Secret must contain at least 16 bytes."
+        )
+
+    if len(secret) % 2 != 0:
+        raise ValueError(
+            "Secret must have an even number of bytes."
+        )
 
     if threshold < 2:
-        raise ValueError("Threshold must be at least 2.")
+        raise ValueError(
+            "Threshold must be at least 2."
+        )
 
     if share_count < threshold:
         raise ValueError(
@@ -47,7 +55,7 @@ def split_secret(
 
     if share_count > 16:
         raise ValueError(
-            "This implementation supports at most 16 shares."
+            "Maximum share count is 16."
         )
 
     mnemonics = generate_mnemonics(
@@ -56,9 +64,9 @@ def split_secret(
             (
                 threshold,
                 share_count,
-                secret,
             )
         ],
+        master_secret=secret,
     )
 
     shares = [
@@ -66,7 +74,9 @@ def split_secret(
             index=index + 1,
             value=value,
         )
-        for index, value in enumerate(mnemonics[0])
+        for index, value in enumerate(
+            mnemonics[0]
+        )
     ]
 
     return SharedSecret(
@@ -78,15 +88,43 @@ def split_secret(
 
 def reconstruct_secret(
     shares: list[SecretShare],
+    *,
+    threshold: int | None = None,
 ) -> bytes:
-    """Reconstruct the original secret from sufficient shares."""
-    if not shares:
-        raise ValueError("At least one share is required.")
 
-    mnemonics = [share.value for share in shares]
+    if not shares:
+        raise ValueError(
+            "At least one share is required."
+        )
+
+    if threshold is None:
+        # When no threshold is explicitly supplied,
+        # use the number of provided shares.
+        #
+        # This supports the common case where the caller
+        # has already selected exactly the required shares.
+        threshold = len(shares)
+
+    if threshold < 2:
+        raise ValueError(
+            "Threshold must be at least 2."
+        )
+
+    if len(shares) < threshold:
+        raise ValueError(
+            "Not enough shares to reconstruct secret."
+        )
+
+    selected_shares = shares[:threshold]
 
     try:
-        return combine_mnemonics(mnemonics)
+        return combine_mnemonics(
+            [
+                share.value
+                for share in selected_shares
+            ]
+        )
+
     except Exception as exc:
         raise ValueError(
             "Secret reconstruction failed."

@@ -9,10 +9,14 @@ from app.core.config import settings
 from app.db.database import Base
 
 # Import all models so Alembic can detect them.
+from app.models.asset import ProtectedAsset
 from app.models.policy import Policy
+from app.models.recovery import (
+    RecoveryApproval,
+    RecoveryRequest,
+)
+from app.models.share import EncryptedShare
 from app.models.trustee import Trustee
-from app.models.recovery import RecoveryRequest, RecoveryApproval
-
 
 config = context.config
 

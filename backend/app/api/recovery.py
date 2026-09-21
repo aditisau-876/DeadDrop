@@ -46,14 +46,16 @@ def create_recovery(
         )
 
     recovery = RecoveryRequest(
-        id=generate_identifier(),
-        policy_id=policy.id,
-        reason=data.reason,
-        incident_hash=data.incident_hash,
-        status="PENDING",
-        approvals=0,
-        required_approvals=3,
-    )
+    id=generate_identifier(),
+    policy_id=policy.id,
+    reason=data.reason,
+    incident_hash=data.incident_hash,
+    status="PENDING",
+    approvals=0,
+    required_approvals=3,
+    policy_version=policy.version,
+    policy_epoch=policy.epoch,
+)
 
     db.add(recovery)
     db.commit()

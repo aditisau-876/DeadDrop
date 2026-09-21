@@ -24,13 +24,13 @@ class RecoveryRequest(Base):
     )
 
     policy_id: Mapped[str] = mapped_column(
-    String(64),
-    ForeignKey(
-        "policies.id",
-        name="fk_recovery_requests_policy_id",
-    ),
-    nullable=False,
-)
+        String(64),
+        ForeignKey(
+            "policies.id",
+            name="fk_recovery_requests_policy_id",
+        ),
+        nullable=False,
+    )
 
     reason: Mapped[str] = mapped_column(
         Text,
@@ -60,6 +60,16 @@ class RecoveryRequest(Base):
         nullable=False,
     )
 
+    policy_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    policy_epoch: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
@@ -76,25 +86,23 @@ class RecoveryApproval(Base):
     )
 
     recovery_id: Mapped[str] = mapped_column(
-    String(64),
-    ForeignKey(
-        "recovery_requests.id",
-        name="fk_recovery_approvals_recovery_id",
-    ),
-    nullable=False,
-)
+        String(64),
+        ForeignKey(
+            "recovery_requests.id",
+            name="fk_recovery_approvals_recovery_id",
+        ),
+        nullable=False,
+    )
 
     trustee_id: Mapped[str] = mapped_column(
-    String(64),
-    ForeignKey(
-        "trustees.id",
-        name="fk_recovery_approvals_trustee_id",
-    ),
-    nullable=False,
-)
+        String(64),
+        ForeignKey(
+            "trustees.id",
+            name="fk_recovery_approvals_trustee_id",
+        ),
+        nullable=False,
+    )
 
-    # The trustee's approval signature.
-    # Actual EIP-712 verification will be added later.
     signature: Mapped[str] = mapped_column(
         Text,
         nullable=False,
@@ -106,8 +114,6 @@ class RecoveryApproval(Base):
         nullable=False,
     )
 
-    # A trustee can approve a particular recovery request
-    # only once.
     __table_args__ = (
         UniqueConstraint(
             "recovery_id",

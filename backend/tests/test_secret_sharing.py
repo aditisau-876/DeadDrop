@@ -21,7 +21,7 @@ def test_threshold_reconstruction():
 
 
 def test_all_shares_reconstruct():
-    secret = b"another secret"
+    secret = b"another secret!!"
 
     result = split_secret(
         secret,
@@ -30,7 +30,7 @@ def test_all_shares_reconstruct():
     )
 
     recovered = reconstruct_secret(
-        result.shares
+        result.shares, threshold=result.threshold,
     )
 
     assert recovered == secret

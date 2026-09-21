@@ -26,14 +26,20 @@ def create_policy(
     data: PolicyCreate,
     db: Session = Depends(get_db),
 ):
-    # Make sure every trustee assigned to the policy exists.
+    # ---------------------------------------------------------
+    # 1. Check that all referenced trustees exist.
+    # ---------------------------------------------------------
+
     trustees = db.scalars(
         select(Trustee).where(
             Trustee.id.in_(data.trustee_ids)
         )
     ).all()
 
-    found_ids = {trustee.id for trustee in trustees}
+    found_ids = {
+        trustee.id
+        for trustee in trustees
+    }
 
     missing_ids = [
         trustee_id
@@ -50,6 +56,39 @@ def create_policy(
             },
         )
 
+    # ---------------------------------------------------------
+    # 2. Make sure trustees are active.
+    # ---------------------------------------------------------
+
+    inactive_trustees = [
+        trustee.id
+        for trustee in trustees
+        if not trustee.active
+    ]
+
+    if inactive_trustees:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "One or more trustees are inactive.",
+                "inactive_trustee_ids": inactive_trustees,
+            },
+        )
+
+    # ---------------------------------------------------------
+    # 3. Prevent duplicate trustee IDs.
+    # ---------------------------------------------------------
+
+    if len(data.trustee_ids) != len(set(data.trustee_ids)):
+        raise HTTPException(
+            status_code=400,
+            detail="Duplicate trustee IDs are not allowed.",
+        )
+
+    # ---------------------------------------------------------
+    # 4. Create the policy.
+    # ---------------------------------------------------------
+
     policy = Policy(
         id=generate_identifier(),
         name=data.name,
@@ -59,6 +98,8 @@ def create_policy(
         version=1,
         epoch=1,
         active=True,
+        expiry_seconds=data.expiry_seconds,
+        timelock_seconds=data.timelock_seconds,
     )
 
     db.add(policy)
@@ -76,7 +117,9 @@ def list_policies(
     db: Session = Depends(get_db),
 ):
     policies = db.scalars(
-        select(Policy).order_by(Policy.created_at)
+        select(Policy).order_by(
+            Policy.created_at
+        )
     ).all()
 
     return list(policies)
@@ -90,7 +133,10 @@ def get_policy(
     policy_id: str,
     db: Session = Depends(get_db),
 ):
-    policy = db.get(Policy, policy_id)
+    policy = db.get(
+        Policy,
+        policy_id,
+    )
 
     if policy is None:
         raise HTTPException(

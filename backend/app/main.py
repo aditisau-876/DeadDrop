@@ -1,11 +1,13 @@
 from fastapi import FastAPI
 
 from app.api import (
+    assets_router,
     health_router,
     policies_router,
-    trustees_router,
-    recovery_router,
     readiness_router,
+    recovery_router,
+    shares_router,
+    trustees_router,
 )
 from app.blockchain import BlockchainClient
 from app.core.config import settings
@@ -20,12 +22,13 @@ app = FastAPI(
     version="0.1.0",
 )
 
-
 app.include_router(health_router)
 app.include_router(policies_router)
 app.include_router(trustees_router)
 app.include_router(recovery_router)
 app.include_router(readiness_router)
+app.include_router(assets_router)
+app.include_router(shares_router)
 
 
 blockchain = BlockchainClient(
