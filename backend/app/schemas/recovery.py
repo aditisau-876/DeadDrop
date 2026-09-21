@@ -13,6 +13,7 @@ class RecoveryCreate(BaseModel):
 
     incident_hash: str = Field(
         min_length=1,
+        max_length=128,
     )
 
 
@@ -34,3 +35,5 @@ class RecoveryResponse(BaseModel):
     status: str
     approvals: int
     required_approvals: int
+    policy_version: int
+    policy_epoch: int

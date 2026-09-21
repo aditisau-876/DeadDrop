@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -25,13 +24,29 @@ class PolicyCreate(BaseModel):
         gt=0,
     )
 
+    timelock_seconds: int | None = Field(
+        default=None,
+        ge=0,
+    )
+
 
 class PolicyResponse(BaseModel):
     id: str
+
     name: str
+
     description: str | None
+
     policy_expression: str
+
     trustee_ids: list[str]
+
     version: int
+
     epoch: int
+
     active: bool
+
+    expiry_seconds: int | None
+
+    timelock_seconds: int | None
