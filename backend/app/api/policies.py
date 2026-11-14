@@ -9,7 +9,7 @@ from app.db.database import get_db
 from app.models.policy import Policy
 from app.models.trustee import Trustee
 from app.schemas.policy import PolicyCreate, PolicyResponse
-
+from app.services.access_structure import validate_policy_tree
 
 router = APIRouter(
     prefix="/api/policies",
@@ -26,9 +26,7 @@ def create_policy(
     data: PolicyCreate,
     db: Session = Depends(get_db),
 ):
-    # ---------------------------------------------------------
-    # 1. Check that all referenced trustees exist.
-    # ---------------------------------------------------------
+
 
     trustees = db.scalars(
         select(Trustee).where(
@@ -56,9 +54,12 @@ def create_policy(
             },
         )
 
-    # ---------------------------------------------------------
-    # 2. Make sure trustees are active.
-    # ---------------------------------------------------------
+    if data.policy_tree is not None:
+        try:
+            validate_policy_tree(data.policy_tree,set(data.trustee_ids))
+        except ValueError as exc:
+            raise HTTPException(status_code=422,detail=str(exc)) from exc
+
 
     inactive_trustees = [
         trustee.id
@@ -75,9 +76,6 @@ def create_policy(
             },
         )
 
-    # ---------------------------------------------------------
-    # 3. Prevent duplicate trustee IDs.
-    # ---------------------------------------------------------
 
     if len(data.trustee_ids) != len(set(data.trustee_ids)):
         raise HTTPException(
@@ -85,15 +83,12 @@ def create_policy(
             detail="Duplicate trustee IDs are not allowed.",
         )
 
-    # ---------------------------------------------------------
-    # 4. Create the policy.
-    # ---------------------------------------------------------
-
     policy = Policy(
         id=generate_identifier(),
         name=data.name,
         description=data.description,
         policy_expression=data.policy_expression,
+        policy_tree=data.policy_tree,
         trustee_ids=data.trustee_ids,
         version=1,
         epoch=1,

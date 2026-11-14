@@ -1,31 +1,46 @@
+
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import generate_identifier
 from app.db.database import get_db
 from app.models.policy import Policy
 from app.models.recovery import RecoveryApproval, RecoveryRequest
 from app.models.trustee import Trustee
 from app.schemas.recovery import (
-    RecoveryApproval as RecoveryApprovalSchema,
     RecoveryCreate,
+    RecoveryApproval as RecoveryApprovalInput,
     RecoveryResponse,
 )
+from app.services.access_structure import evaluate
+from app.crypto.signatures import verify_approval_signature
 
 
-router = APIRouter(
-    prefix="/api/recovery",
-    tags=["Recovery"],
-)
+router = APIRouter(prefix="/api/recovery", tags=["Recovery"])
+
+
+def serialize_recovery(recovery: RecoveryRequest) -> dict:
+    return {
+        "id": recovery.id,
+        "policy_id": recovery.policy_id,
+        "reason": recovery.reason,
+        "incident_hash": recovery.incident_hash,
+        "status": recovery.status,
+        "approvals": recovery.approvals,
+        "required_approvals": recovery.required_approvals,
+        "policy_version": recovery.policy_version,
+        "policy_epoch": recovery.policy_epoch,
+    }
 
 
 @router.post(
     "",
     response_model=RecoveryResponse,
-    status_code=201,
+    status_code=status.HTTP_201_CREATED,
 )
 def create_recovery(
     data: RecoveryCreate,
@@ -41,27 +56,32 @@ def create_recovery(
 
     if not policy.active:
         raise HTTPException(
-            status_code=400,
-            detail="Policy is inactive.",
+            status_code=409,
+            detail="This policy is inactive.",
+        )
+
+    if not policy.policy_tree:
+        raise HTTPException(
+            status_code=409,
+            detail="This policy does not have a structured access policy.",
         )
 
     recovery = RecoveryRequest(
-    id=generate_identifier(),
-    policy_id=policy.id,
-    reason=data.reason,
-    incident_hash=data.incident_hash,
-    status="PENDING",
-    approvals=0,
-    required_approvals=3,
-    policy_version=policy.version,
-    policy_epoch=policy.epoch,
-)
+        policy_id=policy.id,
+        reason=data.reason,
+        incident_hash=data.incident_hash,
+        status="PENDING",
+        approvals=0,
+        required_approvals=3,
+        policy_version=policy.version,
+        policy_epoch=policy.epoch,
+    )
 
     db.add(recovery)
     db.commit()
     db.refresh(recovery)
 
-    return recovery
+    return serialize_recovery(recovery)
 
 
 @router.get(
@@ -80,7 +100,7 @@ def get_recovery(
             detail="Recovery request not found.",
         )
 
-    return recovery
+    return serialize_recovery(recovery)
 
 
 @router.post(
@@ -89,9 +109,15 @@ def get_recovery(
 )
 def approve_recovery(
     recovery_id: str,
-    data: RecoveryApprovalSchema,
+    data: RecoveryApprovalInput,
     db: Session = Depends(get_db),
 ):
+    if data.recovery_id != recovery_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Recovery ID mismatch.",
+        )
+
     recovery = db.get(RecoveryRequest, recovery_id)
 
     if recovery is None:
@@ -102,73 +128,111 @@ def approve_recovery(
 
     if recovery.status != "PENDING":
         raise HTTPException(
-            status_code=400,
-            detail="Recovery request is no longer pending.",
-        )
-
-    if data.recovery_id != recovery_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Recovery ID mismatch.",
-        )
-
-    trustee = db.get(Trustee, data.trustee_id)
-
-    if trustee is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Trustee not found.",
-        )
-
-    if not trustee.active:
-        raise HTTPException(
-            status_code=400,
-            detail="Trustee is inactive.",
+            status_code=409,
+            detail="This recovery request is no longer pending.",
         )
 
     policy = db.get(Policy, recovery.policy_id)
 
-    if policy is None:
+    if policy is None or not policy.active:
         raise HTTPException(
-            status_code=500,
-            detail="Recovery policy could not be found.",
+            status_code=409,
+            detail="The associated policy is unavailable or inactive.",
+        )
+
+    # Prevent approvals against a policy that has changed since
+    # this recovery request was created.
+    if (
+        policy.version != recovery.policy_version
+        or policy.epoch != recovery.policy_epoch
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="The policy changed after this recovery request was created.",
+        )
+
+    if not policy.policy_tree:
+        raise HTTPException(
+            status_code=409,
+            detail="This policy has no structured access policy.",
+        )
+
+    trustee = db.get(Trustee, data.trustee_id)
+
+    if trustee is None or not trustee.active:
+        raise HTTPException(
+            status_code=403,
+            detail="Trustee does not exist or is inactive.",
         )
 
     if data.trustee_id not in policy.trustee_ids:
         raise HTTPException(
             status_code=403,
-            detail="Trustee is not assigned to this policy.",
+            detail="This trustee is not assigned to the policy.",
         )
 
-    # Prevent duplicate trustee approvals.
-    existing = db.scalar(
+    # Verify the actual Ethereum wallet signature.
+    signature_valid = verify_approval_signature(
+        signature=data.signature,
+        expected_wallet=trustee.wallet_address or "",
+        recovery_id=recovery.id,
+        policy_id=policy.id,
+        trustee_id=trustee.id,
+        incident_hash=recovery.incident_hash,
+        policy_version=recovery.policy_version,
+        policy_epoch=recovery.policy_epoch,
+    )
+
+    if not signature_valid:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid trustee approval signature.",
+        )
+
+    existing_approval = db.scalar(
         select(RecoveryApproval).where(
-            RecoveryApproval.recovery_id == recovery_id,
-            RecoveryApproval.trustee_id == data.trustee_id,
+            RecoveryApproval.recovery_id == recovery.id,
+            RecoveryApproval.trustee_id == trustee.id,
         )
     )
 
-    if existing is not None:
+    if existing_approval is not None:
         raise HTTPException(
             status_code=409,
-            detail="Trustee has already approved this recovery request.",
+            detail="This trustee has already approved this recovery.",
         )
 
     approval = RecoveryApproval(
-        id=generate_identifier(),
-        recovery_id=recovery_id,
-        trustee_id=data.trustee_id,
+        recovery_id=recovery.id,
+        trustee_id=trustee.id,
         signature=data.signature,
+        created_at=datetime.utcnow(),
     )
 
-    db.add(approval)
+    try:
+        db.add(approval)
+        db.flush()
 
-    recovery.approvals += 1
+        approved_trustees = set(
+            db.scalars(
+                select(RecoveryApproval.trustee_id).where(
+                    RecoveryApproval.recovery_id == recovery.id
+                )
+            ).all()
+        )
 
-    if recovery.approvals >= recovery.required_approvals:
-        recovery.status = "APPROVED"
+        recovery.approvals = len(approved_trustees)
 
-    db.commit()
-    db.refresh(recovery)
+        # The structured tree determines whether governance
+        # authorization has been satisfied.
+        if evaluate(policy.policy_tree, approved_trustees):
+            recovery.status = "APPROVED"
 
-    return recovery
+        db.commit()
+        db.refresh(recovery)
+
+    except Exception:
+        db.rollback()
+        raise
+
+    return serialize_recovery(recovery)

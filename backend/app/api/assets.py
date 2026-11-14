@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,9 +9,15 @@ from app.core.security import generate_identifier
 from app.db.database import get_db
 from app.models.asset import ProtectedAsset
 from app.models.policy import Policy
+from app.models.share import EncryptedShare
+from app.models.trustee import Trustee
 from app.schemas.asset import (
     AssetCreate,
+    AssetProtectionCreate,
     AssetResponse,
+)
+from app.services.recovery_readiness import (
+    calculate_recovery_readiness,
 )
 
 
@@ -20,19 +27,35 @@ router = APIRouter(
 )
 
 
+def serialize_asset(asset: ProtectedAsset) -> AssetResponse:
+    return AssetResponse(
+        id=asset.id,
+        policy_id=asset.policy_id,
+        name=asset.name,
+        description=asset.description,
+        epoch=asset.epoch,
+        threshold=asset.threshold,
+        created_at=asset.created_at.isoformat(),
+    )
+
+
 @router.post(
-    "",
+    "/protect",
     response_model=AssetResponse,
     status_code=201,
 )
-def create_asset(
-    data: AssetCreate,
+def protect_asset(
+    data: AssetProtectionCreate,
     db: Session = Depends(get_db),
 ):
-    policy = db.get(
-        Policy,
-        data.policy_id,
-    )
+    """
+    Store an encrypted asset and its trustee-encrypted
+    recovery shares atomically.
+
+    The backend never receives the plaintext asset or AES key.
+    """
+
+    policy = db.get(Policy, data.policy_id)
 
     if policy is None:
         raise HTTPException(
@@ -46,29 +69,197 @@ def create_asset(
             detail="Policy is inactive.",
         )
 
+    expected_trustees = set(policy.trustee_ids or [])
+
+    if not expected_trustees:
+        raise HTTPException(
+            status_code=400,
+            detail="The policy has no assigned trustees.",
+        )
+
+    # Cryptographic threshold validation.
+    if data.threshold > len(expected_trustees):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "The cryptographic threshold cannot exceed "
+                "the number of assigned trustees."
+            ),
+        )
+
+    supplied_trustees = [
+        share.trustee_id
+        for share in data.shares
+    ]
+
+    # Reject duplicate trustee shares.
+    if len(supplied_trustees) != len(set(supplied_trustees)):
+        raise HTTPException(
+            status_code=400,
+            detail="Duplicate trustee shares are not allowed.",
+        )
+
+    # Require exactly one share per assigned trustee.
+    if set(supplied_trustees) != expected_trustees:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Exactly one share must be supplied "
+                    "for every trustee assigned to the policy."
+                ),
+                "missing_trustees": sorted(
+                    expected_trustees - set(supplied_trustees)
+                ),
+                "unexpected_trustees": sorted(
+                    set(supplied_trustees) - expected_trustees
+                ),
+            },
+        )
+
+    # Verify that all assigned trustees exist.
+    trustees = db.scalars(
+        select(Trustee).where(
+            Trustee.id.in_(expected_trustees)
+        )
+    ).all()
+
+    if len(trustees) != len(expected_trustees):
+        raise HTTPException(
+            status_code=400,
+            detail="One or more policy trustees no longer exist.",
+        )
+
+    # Reject inactive trustees.
+    inactive_ids = [
+        trustee.id
+        for trustee in trustees
+        if not trustee.active
+    ]
+
+    if inactive_ids:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Inactive trustees cannot receive new shares."
+                ),
+                "inactive_trustee_ids": inactive_ids,
+            },
+        )
+
+    # All supplied shares must belong to the current policy epoch.
+    wrong_epochs = [
+        share.trustee_id
+        for share in data.shares
+        if share.epoch != policy.epoch
+    ]
+
+    if wrong_epochs:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "All shares must use the current policy epoch."
+                ),
+                "expected_epoch": policy.epoch,
+                "trustees_with_wrong_epoch": wrong_epochs,
+            },
+        )
+
+    # Create the protected asset.
     asset = ProtectedAsset(
         id=generate_identifier(),
-        policy_id=data.policy_id,
+        policy_id=policy.id,
+        name=data.name,
+        description=data.description,
+        ciphertext=data.ciphertext,
+        nonce=data.nonce,
+        aad=data.aad,
+        epoch=policy.epoch,
+        threshold=data.threshold,
+    )
+
+    try:
+        db.add(asset)
+        db.flush()
+
+        # Store all encrypted shares.
+        for share_data in data.shares:
+            share = EncryptedShare(
+                id=generate_identifier(),
+                asset_id=asset.id,
+                trustee_id=share_data.trustee_id,
+                encrypted_share=share_data.encrypted_share,
+                commitment=share_data.commitment.lower(),
+                epoch=share_data.epoch,
+            )
+
+            db.add(share)
+
+        db.commit()
+        db.refresh(asset)
+
+    except Exception:
+        db.rollback()
+        raise
+
+    return serialize_asset(asset)
+
+
+@router.post(
+    "",
+    response_model=AssetResponse,
+    status_code=201,
+)
+def create_asset(
+    data: AssetCreate,
+    db: Session = Depends(get_db),
+):
+    """
+    Legacy encrypted-asset creation endpoint.
+
+    For a complete protected asset with trustee shares,
+    use POST /api/assets/protect.
+    """
+
+    policy = db.get(Policy, data.policy_id)
+
+    if policy is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Policy not found.",
+        )
+
+    if not policy.active:
+        raise HTTPException(
+            status_code=400,
+            detail="Policy is inactive.",
+        )
+
+    if data.epoch != policy.epoch:
+        raise HTTPException(
+            status_code=400,
+            detail="Asset epoch does not match policy epoch.",
+        )
+
+    asset = ProtectedAsset(
+        id=generate_identifier(),
+        policy_id=policy.id,
         name=data.name,
         description=data.description,
         ciphertext=data.ciphertext,
         nonce=data.nonce,
         aad=data.aad,
         epoch=data.epoch,
+        threshold=3,
     )
 
     db.add(asset)
     db.commit()
     db.refresh(asset)
 
-    return AssetResponse(
-        id=asset.id,
-        policy_id=asset.policy_id,
-        name=asset.name,
-        description=asset.description,
-        epoch=asset.epoch,
-        created_at=asset.created_at.isoformat(),
-    )
+    return serialize_asset(asset)
 
 
 @router.get(
@@ -85,16 +276,40 @@ def list_assets(
     ).all()
 
     return [
-        AssetResponse(
-            id=asset.id,
-            policy_id=asset.policy_id,
-            name=asset.name,
-            description=asset.description,
-            epoch=asset.epoch,
-            created_at=asset.created_at.isoformat(),
-        )
+        serialize_asset(asset)
         for asset in assets
     ]
+
+
+@router.get(
+    "/{asset_id}/readiness",
+)
+def get_asset_readiness(
+    asset_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Calculate structural recovery readiness.
+
+    This does not prove that the underlying Shamir shares
+    are mathematically valid.
+    """
+
+    asset = db.get(
+        ProtectedAsset,
+        asset_id,
+    )
+
+    if asset is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Protected asset not found.",
+        )
+
+    return calculate_recovery_readiness(
+        db,
+        asset,
+    )
 
 
 @router.get(
@@ -116,11 +331,4 @@ def get_asset(
             detail="Protected asset not found.",
         )
 
-    return AssetResponse(
-        id=asset.id,
-        policy_id=asset.policy_id,
-        name=asset.name,
-        description=asset.description,
-        epoch=asset.epoch,
-        created_at=asset.created_at.isoformat(),
-    )
+    return serialize_asset(asset)

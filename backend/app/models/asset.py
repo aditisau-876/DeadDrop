@@ -63,3 +63,8 @@ class ProtectedAsset(Base):
         default=datetime.utcnow,
         nullable=False,
     )
+    threshold: Mapped[int] = mapped_column(
+    Integer,
+    nullable=False,
+    default=3,
+)

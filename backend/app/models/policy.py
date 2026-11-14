@@ -35,6 +35,8 @@ class Policy(Base):
         nullable=False,
     )
 
+    policy_tree: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # IDs of trustees participating in this policy.
     trustee_ids: Mapped[list[str]] = mapped_column(
         JSON,
