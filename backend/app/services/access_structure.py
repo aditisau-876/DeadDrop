@@ -1,138 +1,134 @@
+
 from __future__ import annotations
 
 from typing import Any
 
 
-class PolicyEvaluationError(ValueError):
-    """Raised when an access structure is invalid."""
+MAX_POLICY_DEPTH = 12
+MAX_POLICY_NODES = 100
+MAX_CHILDREN = 20
+
+
+def validate_policy_tree(
+    node: dict[str, Any],
+    allowed_trustees: set[str],
+) -> None:
+    """Validate a policy tree and ensure it references assigned trustees."""
+
+    if not isinstance(node, dict):
+        raise ValueError("Policy node must be an object.")
+
+    node_count = 0
+    seen_trustees: set[str] = set()
+
+    def walk(current: dict[str, Any], depth: int) -> None:
+        nonlocal node_count
+
+        node_count += 1
+
+        if node_count > MAX_POLICY_NODES:
+            raise ValueError("Policy tree contains too many nodes.")
+
+        if depth > MAX_POLICY_DEPTH:
+            raise ValueError("Policy tree is too deeply nested.")
+
+        if not isinstance(current, dict):
+            raise ValueError("Every policy node must be an object.")
+
+        node_type = current.get("type")
+
+        if node_type == "LEAF":
+            trustee_id = current.get("trustee_id")
+
+            if not isinstance(trustee_id, str) or not trustee_id:
+                raise ValueError("LEAF nodes require a trustee_id.")
+
+            if trustee_id not in allowed_trustees:
+                raise ValueError(
+                    f"Trustee {trustee_id} is not assigned to this policy."
+                )
+
+            if trustee_id in seen_trustees:
+                raise ValueError(
+                    f"Trustee {trustee_id} appears more than once."
+                )
+
+            seen_trustees.add(trustee_id)
+            return
+
+        if node_type not in {"AND", "OR", "THRESHOLD"}:
+            raise ValueError(f"Unsupported policy node type: {node_type}")
+
+        children = current.get("children")
+
+        if not isinstance(children, list) or not children:
+            raise ValueError(f"{node_type} requires a non-empty children list.")
+
+        if len(children) > MAX_CHILDREN:
+            raise ValueError("A policy node has too many children.")
+
+        if node_type == "THRESHOLD":
+            threshold = current.get("threshold")
+
+            if (
+                not isinstance(threshold, int)
+                or isinstance(threshold, bool)
+                or threshold < 1
+                or threshold > len(children)
+            ):
+                raise ValueError(
+                    "THRESHOLD must be between 1 and the number of children."
+                )
+
+        for child in children:
+            walk(child, depth + 1)
+
+    walk(node, 1)
 
 
 def evaluate(
     node: dict[str, Any],
     approved_trustees: set[str],
 ) -> bool:
-    """
-    Evaluate a DeadDrop access-structure tree.
-
-    Supported node types:
-
-    leaf
-        A single trustee.
-
-    THRESHOLD
-        At least `threshold` children must be satisfied.
-
-    AND
-        Every child must be satisfied.
-
-    OR
-        At least one child must be satisfied.
-
-    Example:
-
-        {
-            "type": "THRESHOLD",
-            "threshold": 2,
-            "children": [
-                {"type": "leaf", "trustee_id": "T1"},
-                {"type": "leaf", "trustee_id": "T2"},
-                {"type": "leaf", "trustee_id": "T3"},
-            ],
-        }
-
-    With:
-
-        {"T1", "T3"}
-
-    the policy is satisfied.
-    """
+    """Evaluate a validated policy tree against approved trustees."""
 
     if not isinstance(node, dict):
-        raise PolicyEvaluationError(
-            "Access-structure node must be an object."
-        )
+        raise ValueError("Invalid policy node.")
 
     node_type = node.get("type")
-
-    if not isinstance(node_type, str):
-        raise PolicyEvaluationError(
-            "Access-structure node is missing 'type'."
-        )
-
-    node_type = node_type.upper()
-
-    # ---------------------------------------------------------
-    # LEAF
-    # ---------------------------------------------------------
 
     if node_type == "LEAF":
         trustee_id = node.get("trustee_id")
 
-        if not isinstance(trustee_id, str) or not trustee_id:
-            raise PolicyEvaluationError(
-                "Leaf node requires a trustee_id."
-            )
+        if not isinstance(trustee_id, str):
+            raise ValueError("Invalid LEAF node.")
 
         return trustee_id in approved_trustees
-
-    # ---------------------------------------------------------
-    # Composite nodes
-    # ---------------------------------------------------------
 
     children = node.get("children")
 
     if not isinstance(children, list) or not children:
-        raise PolicyEvaluationError(
-            f"{node_type} node requires a non-empty children list."
-        )
+        raise ValueError("Invalid policy children.")
 
-    # Recursively evaluate every child.
-
-    results = [
-        evaluate(child, approved_trustees)
-        for child in children
-    ]
-
-    # ---------------------------------------------------------
-    # AND
-    # ---------------------------------------------------------
+    results = [evaluate(child, approved_trustees) for child in children]
 
     if node_type == "AND":
         return all(results)
 
-    # ---------------------------------------------------------
-    # OR
-    # ---------------------------------------------------------
-
     if node_type == "OR":
         return any(results)
-
-    # ---------------------------------------------------------
-    # THRESHOLD
-    # ---------------------------------------------------------
 
     if node_type == "THRESHOLD":
         threshold = node.get("threshold")
 
-        if not isinstance(threshold, int):
-            raise PolicyEvaluationError(
-                "THRESHOLD node requires an integer threshold."
-            )
+        if (
+            not isinstance(threshold, int)
+            or isinstance(threshold, bool)
+            or threshold < 1
+            or threshold > len(results)
+        ):
+            raise ValueError("Invalid threshold.")
 
-        if threshold < 1:
-            raise PolicyEvaluationError(
-                "Threshold must be at least 1."
-            )
+        return sum(results) >= threshold
 
-        if threshold > len(children):
-            raise PolicyEvaluationError(
-                "Threshold cannot exceed the number of children."
-            )
-
-        satisfied_children = sum(results)
-
-        return satisfied_children >= threshold
-
-    raise PolicyEvaluationError(
-        f"Unsupported access-structure node type: {node_type}"
-    )
+    raise ValueError(f"Unsupported policy node type: {node_type}")

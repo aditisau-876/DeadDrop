@@ -10,6 +10,9 @@ class Settings(BaseSettings):
 
     blockchain_rpc_url: str = "http://127.0.0.1:8545"
     blockchain_chain_id: int = 31337
+    blockchain_verifying_contract_address: str = (
+    "0x0000000000000000000000000000000000000000"
+)
 
     model_config = SettingsConfigDict(
         env_file=".env",
