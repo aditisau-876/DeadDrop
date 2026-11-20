@@ -232,19 +232,24 @@
   }
 
   header.top {
-    position: relative;
-    height: calc(120 * var(--s));
-    flex: 0 0 auto;
-  }
+  position: relative;
+  width: 100%;
+  height: 100px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4%;
+  gap: 30px;
+}
 
-  .brand {
-    position: absolute;
-    left: calc(var(--bx) * var(--s));
-    top: calc(var(--by) * var(--s));
-    display: flex;
-    align-items: center;
-    gap: calc(14 * var(--s));
-  }
+.brand {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
   .brand svg { width: calc(var(--bs) * 1.02); height: calc(var(--bs) * 1.02); display: block; }
   .brand .wordwrap { display: flex; flex-direction: column; line-height: 1; }
   .brand .word {
@@ -262,40 +267,42 @@
   }
 
   nav.desktop-nav {
-    position: absolute;
-    left: calc(482 * var(--s));
-    top: calc(32 * var(--s));
-    display: flex;
-    gap: calc(38 * var(--s));
-  }
-  nav.desktop-nav a {
-    font-family: var(--font-jb);
-    font-weight: 400;
-    font-size: calc(19.9 * var(--s));
-    color: #fff;
-  }
-  @media (hover:hover) {
-    nav.desktop-nav a:hover { color: var(--red); }
-  }
+  position: static;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(20px, 3vw, 42px);
+  margin-left: auto;
+}
 
-  .top-cta {
-    position: absolute;
-    right: calc(var(--bx) * var(--s));
-    top: calc(28 * var(--s));
-    display: inline-flex;
-    align-items: center;
-    gap: calc(10 * var(--s));
-    background: var(--red);
-    color: #fff;
-    border: none;
-    height: calc(50 * var(--s));
-    padding: 0 calc(22 * var(--s));
-    font-family: var(--font-jb);
-    font-size: calc(15.5 * var(--s));
-    letter-spacing: .02em;
-    cursor: pointer;
-    clip-path: inset(0 0 0 0);
-  }
+nav.desktop-nav a {
+  font-family: var(--font-jb);
+  font-size: clamp(13px, 1.15vw, 17px);
+  color: #fff;
+  white-space: nowrap;
+  transition: color 0.2s ease;
+}
+
+nav.desktop-nav a:hover {
+  color: var(--red);
+}
+
+.top-cta {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-shrink: 0;
+  height: 48px;
+  padding: 0 20px;
+  background: var(--red);
+  color: #fff;
+  font-family: var(--font-jb);
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
   .top-cta svg { width: calc(16 * var(--s)); height: calc(14 * var(--s)); }
   @media (hover:hover) {
     .top-cta:hover { background: var(--red-dark); }
@@ -345,6 +352,7 @@
 
   .hero {
     position: relative;
+    transform: translateY(-200px);
     flex: 0 0 auto;
     padding-left: calc(73 * var(--s));
     padding-right: calc(40 * var(--s));
@@ -656,6 +664,15 @@
   @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; animation: none !important; }
   }
+
+  /* Hide SVG filter definitions without removing them */
+.svgdefs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 </style>
 <svg class="svgdefs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
 <filter id="grade" color-interpolation-filters="sRGB"><feComponentTransfer><feFuncR type="gamma" amplitude="0.95" exponent="1.08" offset="0"/><feFuncG type="gamma" amplitude="0.78" exponent="1.12" offset="0"/><feFuncB type="gamma" amplitude="0.78" exponent="1.12" offset="0"/></feComponentTransfer></filter>
