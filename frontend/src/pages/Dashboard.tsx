@@ -1,57 +1,92 @@
-import type { ReactNode } from "react";
+
+import { Page } from "../components/Page";
 
 const stats = [
-  ["Active Policies", "4"],
-  ["Trustees Verified", "5 / 5"],
-  ["Pending Recoveries", "1"],
-  ["Current Epoch", "4"],
+  {
+    label: "Active Policies",
+    value: "4",
+  },
+  {
+    label: "Trustees Verified",
+    value: "5 / 5",
+  },
+  {
+    label: "Pending Recoveries",
+    value: "1",
+  },
+  {
+    label: "Current Epoch",
+    value: "4",
+  },
 ];
 
 export function Dashboard() {
   return (
     <Page
       title="DeadDrop Dashboard"
-      sub="Publicly verifiable emergency recovery status."
+      sub="OVERVIEW / SECURITY STATUS"
     >
       <div className="grid">
-        {stats.map(([label, value]) => (
-          <section className="card" key={label}>
-            <small>{label}</small>
-            <h2>{value}</h2>
+        {stats.map((stat) => (
+          <section className="card stat-card" key={stat.label}>
+            <small>{stat.label}</small>
+            <h2>{stat.value}</h2>
           </section>
         ))}
       </div>
 
-      <section className="card">
-        <h3>Master Root Signing Key</h3>
+      <section className="card policy-overview">
+        <div className="section-heading">
+          <div>
+            <small className="eyebrow">ACCESS STRUCTURE</small>
+            <h3>Master Root Signing Key</h3>
+          </div>
+
+          <span className="ok">Policy Active</span>
+        </div>
 
         <div className="tree">
-          (Security Lead AND CTO) OR
-          <br />
-          (External Auditor AND Threshold(2, Admins))
+          <div>(Security Lead AND CTO)</div>
+          <div className="tree-operator">OR</div>
+          <div>
+            (External Auditor AND Threshold(2, Admins))
+          </div>
         </div>
 
         <p>
-          Governance quorum and cryptographic readiness are tracked
-          independently.
+          Governance quorum and cryptographic readiness are
+          tracked independently.
         </p>
       </section>
+
+      <section className="card">
+        <div className="section-heading">
+          <div>
+            <small className="eyebrow">PROTOCOL STATUS</small>
+            <h3>Recovery Infrastructure</h3>
+          </div>
+        </div>
+
+        <div className="row">
+          <span>Policy evaluation</span>
+          <span className="ok">Available</span>
+        </div>
+
+        <div className="row">
+          <span>Encrypted share storage</span>
+          <span className="ok">Available</span>
+        </div>
+
+        <div className="row">
+          <span>Trustee share release</span>
+          <span className="ok">API configured</span>
+        </div>
+
+        <div className="row">
+          <span>On-chain enforcement</span>
+          <span className="warning-status">Not deployed</span>
+        </div>
+      </section>
     </Page>
-  );
-}
-
-type PageProps = {
-  title: string;
-  sub: string;
-  children?: ReactNode;
-};
-
-export function Page({ title, sub, children }: PageProps) {
-  return (
-    <div className="page">
-      <small>{sub}</small>
-      <h1>{title}</h1>
-      {children}
-    </div>
   );
 }
