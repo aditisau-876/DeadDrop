@@ -1,4 +1,6 @@
+
 import { NavLink, Outlet } from "react-router-dom";
+
 import {
   LayoutDashboard,
   FileKey2,
@@ -32,37 +34,55 @@ const links = [
 export function Shell() {
   return (
     <div className="shell">
-      <aside>
+      <aside className="sidebar">
         <div className="brand">
-          <b>D</b>
+          <b className="brand-logo">D</b>
 
-          <div>
+          <div className="brand-info">
             <strong>DeadDrop</strong>
             <small>Emergency Recovery</small>
           </div>
         </div>
 
-        <nav>
+        <div className="sidebar-label">WORKSPACE</div>
+
+        <nav className="sidebar-nav">
           {links.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
-              className={({ isActive }) => (isActive ? "active" : "")}
+              className={({ isActive }) =>
+                isActive ? "nav-link active" : "nav-link"
+              }
             >
-              <Icon size={17} />
+              <Icon size={18} strokeWidth={1.9} />
               <span>{label}</span>
             </NavLink>
           ))}
         </nav>
+
+        <div className="sidebar-footer">
+          <span className="sidebar-status-dot" />
+          <span>Protocol Environment</span>
+        </div>
       </aside>
 
-      <main>
-        <header>
-          <strong>Recovery Control Plane</strong>
-          <span>System Operational</span>
+      <main className="main-content">
+        <header className="topbar">
+          <div>
+            <strong>Recovery Control Plane</strong>
+            <small>DeadDrop / Security Console</small>
+          </div>
+
+          <div className="system-status">
+            <span className="status-dot" />
+            System Operational
+          </div>
         </header>
 
-        <Outlet />
+        <div className="content-area">
+          <Outlet />
+        </div>
       </main>
     </div>
   );
