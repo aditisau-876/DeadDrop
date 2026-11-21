@@ -1,4 +1,4 @@
-import { Page } from "./Dashboard";
+import { Page } from "../components/Page";
 
 const trustees = [
   "Security Lead",

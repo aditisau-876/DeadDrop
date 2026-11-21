@@ -1,88 +1,64 @@
-
 import { NavLink, Outlet } from "react-router-dom";
 
-import {
-  LayoutDashboard,
-  FileKey2,
-  LockKeyhole,
-  ShieldCheck,
-} from "lucide-react";
-
 const links = [
-  {
-    to: "/dashboard",
-    label: "Dashboard",
-    icon: LayoutDashboard,
-  },
-  {
-    to: "/policies",
-    label: "Policies",
-    icon: FileKey2,
-  },
-  {
-    to: "/recovery",
-    label: "Recovery",
-    icon: LockKeyhole,
-  },
-  {
-    to: "/readiness",
-    label: "Readiness",
-    icon: ShieldCheck,
-  },
+  { to: "/dashboard", label: "Dashboard" },
+  { to: "/policies", label: "Policies" },
+  { to: "/recovery", label: "Recovery" },
+  { to: "/readiness", label: "Readiness" },
 ];
+
+function DeadDropMark() {
+  return (
+    <svg
+      className="console-mark"
+      viewBox="0 0 46 46"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <polyline points="18,7 23,13 28,7" stroke="currentColor" strokeWidth="3" strokeLinecap="butt" strokeLinejoin="miter" />
+      <polyline points="18,39 23,33 28,39" stroke="currentColor" strokeWidth="3" strokeLinecap="butt" strokeLinejoin="miter" />
+      <polyline points="7,18 13,23 7,28" stroke="currentColor" strokeWidth="3" strokeLinecap="butt" strokeLinejoin="miter" />
+      <polyline points="39,18 33,23 39,28" stroke="currentColor" strokeWidth="3" strokeLinecap="butt" strokeLinejoin="miter" />
+      <rect x="18.5" y="18.5" width="9" height="9" stroke="currentColor" strokeWidth="3" />
+    </svg>
+  );
+}
 
 export function Shell() {
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <b className="brand-logo">D</b>
+    <div className="console-shell">
+      <header className="console-header">
+        <a className="console-brand" href="/" aria-label="DeadDrop home">
+          <DeadDropMark />
+          <span className="console-wordwrap">
+            <span className="console-word">DeadDrop</span>
+            <span className="console-brand-caption">RECOVERY PROTOCOL</span>
+          </span>
+        </a>
 
-          <div className="brand-info">
-            <strong>DeadDrop</strong>
-            <small>Emergency Recovery</small>
-          </div>
-        </div>
-
-        <div className="sidebar-label">WORKSPACE</div>
-
-        <nav className="sidebar-nav">
-          {links.map(({ to, label, icon: Icon }) => (
+        <nav className="console-nav" aria-label="Console navigation">
+          {links.map(({ to, label }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
-                isActive ? "nav-link active" : "nav-link"
+                isActive ? "console-nav-link active" : "console-nav-link"
               }
             >
-              <Icon size={18} strokeWidth={1.9} />
-              <span>{label}</span>
+              {label}
             </NavLink>
           ))}
         </nav>
 
-        <div className="sidebar-footer">
-          <span className="sidebar-status-dot" />
-          <span>Protocol Environment</span>
+        <div className="console-header-meta">
+          <span className="console-status-dot" />
+          <span>SECURE CONSOLE</span>
         </div>
-      </aside>
+      </header>
 
-      <main className="main-content">
-        <header className="topbar">
-          <div>
-            <strong>Recovery Control Plane</strong>
-            <small>DeadDrop / Security Console</small>
-          </div>
-
-          <div className="system-status">
-            <span className="status-dot" />
-            System Operational
-          </div>
-        </header>
-
-        <div className="content-area">
-          <Outlet />
-        </div>
+      <main className="console-main">
+        <Outlet />
       </main>
     </div>
   );

@@ -1,19 +1,16 @@
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.crypto.commitments import (
-    create_share_commitment,
-)
+from app.crypto.commitments import create_share_commitment
 from app.crypto.secret_sharing import (
     SecretShare,
     SharedSecret,
     reconstruct_secret,
     split_secret,
 )
-from app.crypto.share_encryption import (
-    encrypt_share_for_trustee,
-)
+from app.crypto.share_encryption import encrypt_share_for_trustee
 
 
 @dataclass(frozen=True)
@@ -40,29 +37,48 @@ def prepare_recovery_material(
     epoch: int,
 ) -> PreparedRecoveryMaterial:
     """
-    Split a secret into shares and encrypt each share
-    for its assigned trustee.
+    Split a secret and encrypt one share for each trustee.
 
-    `trustees` must contain:
-
+    Each trustee entry must contain:
         {
             "id": "...",
             "public_key": "..."
         }
 
-    The plaintext shares are returned only to the
-    calling process and are not persisted here.
+    Plaintext shares are returned only to the calling process.
+    They must never be persisted by the backend.
     """
 
+    if not policy_id:
+        raise ValueError("Policy ID is required.")
+
+    if epoch < 1:
+        raise ValueError("Epoch must be at least 1.")
+
     if not trustees:
-        raise ValueError(
-            "At least one trustee is required."
-        )
+        raise ValueError("At least one trustee is required.")
+
+    if threshold < 2:
+        raise ValueError("Threshold must be at least 2.")
 
     if threshold > len(trustees):
         raise ValueError(
             "Threshold cannot exceed trustee count."
         )
+
+    trustee_ids = [trustee.get("id") for trustee in trustees]
+
+    if any(not trustee_id for trustee_id in trustee_ids):
+        raise ValueError("Every trustee must have an ID.")
+
+    if len(trustee_ids) != len(set(trustee_ids)):
+        raise ValueError("Duplicate trustee IDs are not allowed.")
+
+    for trustee in trustees:
+        if not trustee.get("public_key"):
+            raise ValueError(
+                f"Trustee {trustee['id']} has no public key."
+            )
 
     shared_secret = split_secret(
         secret,
@@ -78,11 +94,6 @@ def prepare_recovery_material(
     ):
         trustee_id = trustee["id"]
         public_key = trustee["public_key"]
-
-        if not public_key:
-            raise ValueError(
-                f"Trustee {trustee_id} has no public key."
-            )
 
         commitment = create_share_commitment(
             share.value,
@@ -117,12 +128,26 @@ def prepare_recovery_material(
 
 def reconstruct_from_shares(
     shares: list[SecretShare],
+    *,
+    threshold: int,
 ) -> bytes:
     """
-    Reconstruct the original secret from valid shares.
+    Reconstruct the original secret from at least `threshold`
+    valid shares.
 
-    This function should ultimately execute on the
-    recovery client, not the normal backend.
+    This function belongs on the trusted recovery client.
+    The backend must not receive plaintext shares.
     """
 
-    return reconstruct_secret(shares)
+    if threshold < 2:
+        raise ValueError("Threshold must be at least 2.")
+
+    if len(shares) < threshold:
+        raise ValueError(
+            "Not enough shares to reconstruct the secret."
+        )
+
+    return reconstruct_secret(
+        shares,
+        threshold=threshold,
+    )
