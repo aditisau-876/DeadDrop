@@ -1,13 +1,23 @@
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import generate_identifier, get_current_user, require_roles, ensure_owner_or_admin
+from app.core.security import (
+    generate_identifier,
+    get_current_user,
+    require_roles,
+)
 from app.db.database import get_db
+from app.models.policy import Policy
 from app.models.trustee import Trustee
-from app.schemas.trustee import TrusteeCreate, TrusteeResponse
+from app.schemas.trustee import (
+    TrusteeCreate,
+    TrusteeResponse,
+    TrusteeStatusUpdate,
+)
 
 
 router = APIRouter(
@@ -25,7 +35,7 @@ router = APIRouter(
 def create_trustee(
     data: TrusteeCreate,
     db: Session = Depends(get_db),
-    user = Depends(require_roles("admin")),
+    user=Depends(require_roles("admin")),
 ):
     trustee = Trustee(
         id=generate_identifier(),
@@ -49,6 +59,7 @@ def create_trustee(
 )
 def list_trustees(
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     trustees = db.scalars(
         select(Trustee).order_by(Trustee.created_at)
@@ -64,6 +75,7 @@ def list_trustees(
 def get_trustee(
     trustee_id: str,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     trustee = db.get(Trustee, trustee_id)
 
@@ -72,5 +84,76 @@ def get_trustee(
             status_code=404,
             detail="Trustee not found.",
         )
+
+    return trustee
+
+
+@router.patch(
+    "/{trustee_id}/status",
+    response_model=TrusteeResponse,
+)
+def update_trustee_status(
+    trustee_id: str,
+    data: TrusteeStatusUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles("admin")),
+):
+    trustee = db.scalar(
+        select(Trustee)
+        .where(Trustee.id == trustee_id)
+        .with_for_update()
+    )
+
+    if trustee is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Trustee not found.",
+        )
+
+    if trustee.active == data.active:
+        return trustee
+
+    if not data.active:
+        active_policies = db.scalars(select(Policy).where(Policy.active.is_(True))).all()
+        assigned_policy = next(
+            (
+                policy
+                for policy in active_policies
+                if trustee.id in (policy.trustee_ids or [])
+            ),
+            None,
+        )
+
+        if assigned_policy is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": (
+                        "This trustee is assigned to an active policy. "
+                        "Update or deactivate the policy before "
+                        "deactivating this trustee."
+                    ),
+                    "policy_id": assigned_policy.id,
+                },
+            )
+
+
+        if assigned_policy is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": (
+                        "This trustee is assigned to an active policy. "
+                        "Update or deactivate the policy before "
+                        "deactivating this trustee."
+                    ),
+                    "policy_id": assigned_policy,
+                },
+            )
+
+    trustee.active = data.active
+
+    db.commit()
+    db.refresh(trustee)
 
     return trustee

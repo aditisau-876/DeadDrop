@@ -19,7 +19,7 @@ from app.models.recovery import (
 from app.models.share import EncryptedShare
 from app.models.trustee import Trustee
 from app.models.user import User
-
+from app.models.audit_log import AuditLog
 config = context.config
 
 

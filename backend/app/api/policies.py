@@ -1,15 +1,25 @@
 from __future__ import annotations
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import generate_identifier, get_current_user, require_roles, ensure_owner_or_admin
+from app.core.security import (
+    ensure_owner_or_admin,
+    generate_identifier,
+    get_current_user,
+    require_roles,
+)
 from app.db.database import get_db
 from app.models.policy import Policy
+from app.models.recovery import RecoveryRequest
 from app.models.trustee import Trustee
-from app.schemas.policy import PolicyCreate, PolicyResponse
+from app.schemas.policy import (
+    PolicyCreate,
+    PolicyResponse,
+    PolicyUpdate,
+)
 from app.services.access_structure import validate_policy_tree
+
 
 router = APIRouter(
     prefix="/api/policies",
@@ -17,33 +27,79 @@ router = APIRouter(
     tags=["Policies"],
 )
 
+ACTIVE_RECOVERY_STATUSES = {"PENDING", "APPROVED"}
 
-@router.post(
-    "",
-    response_model=PolicyResponse,
-    status_code=201,
-)
-def create_policy(
-    data: PolicyCreate,
-    db: Session = Depends(get_db),
-    user = Depends(require_roles("owner", "admin")),
-):
 
+def get_policy_or_404(
+    db: Session,
+    policy_id: str,
+) -> Policy:
+    policy = db.scalar(
+        select(Policy)
+        .where(Policy.id == policy_id)
+        .with_for_update()
+    )
+
+    if policy is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Policy not found.",
+        )
+
+    return policy
+
+
+def ensure_no_active_recoveries(
+    db: Session,
+    policy_id: str,
+) -> None:
+    recovery = db.scalar(
+        select(RecoveryRequest.id)
+        .where(
+            RecoveryRequest.policy_id == policy_id,
+            RecoveryRequest.status.in_(ACTIVE_RECOVERY_STATUSES),
+        )
+        .limit(1)
+    )
+
+    if recovery is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This policy has an active recovery request. "
+                "Wait until it is completed, cancelled, or expired "
+                "before modifying the policy."
+            ),
+        )
+
+
+def load_and_validate_trustees(
+    db: Session,
+    trustee_ids: list[str],
+) -> list[Trustee]:
+    if not trustee_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one trustee must be assigned.",
+        )
+
+    if len(trustee_ids) != len(set(trustee_ids)):
+        raise HTTPException(
+            status_code=400,
+            detail="Duplicate trustee IDs are not allowed.",
+        )
 
     trustees = db.scalars(
-        select(Trustee).where(
-            Trustee.id.in_(data.trustee_ids)
-        )
+        select(Trustee)
+        .where(Trustee.id.in_(trustee_ids))
+        .with_for_update()
     ).all()
 
-    found_ids = {
-        trustee.id
-        for trustee in trustees
-    }
+    found_ids = {trustee.id for trustee in trustees}
 
     missing_ids = [
         trustee_id
-        for trustee_id in data.trustee_ids
+        for trustee_id in trustee_ids
         if trustee_id not in found_ids
     ]
 
@@ -56,34 +112,50 @@ def create_policy(
             },
         )
 
-    if data.policy_tree is not None:
-        try:
-            validate_policy_tree(data.policy_tree,set(data.trustee_ids))
-        except ValueError as exc:
-            raise HTTPException(status_code=422,detail=str(exc)) from exc
-
-
-    inactive_trustees = [
+    inactive_ids = [
         trustee.id
         for trustee in trustees
         if not trustee.active
     ]
 
-    if inactive_trustees:
+    if inactive_ids:
         raise HTTPException(
-            status_code=400,
+            status_code=409,
             detail={
-                "message": "One or more trustees are inactive.",
-                "inactive_trustee_ids": inactive_trustees,
+                "message": "Inactive trustees cannot be assigned.",
+                "inactive_trustee_ids": inactive_ids,
             },
         )
 
+    return trustees
 
-    if len(data.trustee_ids) != len(set(data.trustee_ids)):
-        raise HTTPException(
-            status_code=400,
-            detail="Duplicate trustee IDs are not allowed.",
-        )
+
+@router.post(
+    "",
+    response_model=PolicyResponse,
+    status_code=201,
+)
+def create_policy(
+    data: PolicyCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles("owner", "admin")),
+):
+    trustees = load_and_validate_trustees(
+        db,
+        data.trustee_ids,
+    )
+
+    if data.policy_tree is not None:
+        try:
+            validate_policy_tree(
+                data.policy_tree,
+                set(data.trustee_ids),
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=str(exc),
+            ) from exc
 
     policy = Policy(
         id=generate_identifier(),
@@ -92,7 +164,7 @@ def create_policy(
         description=data.description,
         policy_expression=data.policy_expression,
         policy_tree=data.policy_tree,
-        trustee_ids=data.trustee_ids,
+        trustee_ids=[trustee.id for trustee in trustees],
         version=1,
         epoch=1,
         active=True,
@@ -113,13 +185,16 @@ def create_policy(
 )
 def list_policies(
     db: Session = Depends(get_db),
-    user = Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     query = select(Policy).order_by(Policy.created_at)
-    if user.role != "admin": query = query.where(Policy.owner_user_id == user.id)
-    policies = db.scalars(query).all()
 
-    return list(policies)
+    if user.role != "admin":
+        query = query.where(
+            Policy.owner_user_id == user.id
+        )
+
+    return list(db.scalars(query).all())
 
 
 @router.get(
@@ -129,14 +204,147 @@ def list_policies(
 def get_policy(
     policy_id: str,
     db: Session = Depends(get_db),
-    user = Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
-    policy = db.get(
-        Policy,
-        policy_id,
-    )
+    policy = db.get(Policy, policy_id)
 
     if policy is None:
-        raise HTTPException(status_code=404, detail="Policy not found.")
-    ensure_owner_or_admin(user, policy.owner_user_id)
+        raise HTTPException(
+            status_code=404,
+            detail="Policy not found.",
+        )
+
+    ensure_owner_or_admin(
+        user,
+        policy.owner_user_id,
+    )
+
+    return policy
+
+
+@router.patch(
+    "/{policy_id}",
+    response_model=PolicyResponse,
+)
+def update_policy(
+    policy_id: str,
+    data: PolicyUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles("owner", "admin")),
+):
+    policy = get_policy_or_404(db, policy_id)
+
+    ensure_owner_or_admin(
+        user,
+        policy.owner_user_id,
+    )
+
+    if data.expected_version != policy.version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Policy version conflict.",
+                "current_version": policy.version,
+                "submitted_version": data.expected_version,
+            },
+        )
+
+    updates = data.dict(exclude_unset=True)
+    updates.pop("expected_version", None)
+    for required_field in ("name","policy_expression","trustee_ids","active"):
+        if required_field in updates and updates[required_field] is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{required_field} cannot be null.",
+            )
+
+    if not updates:
+        raise HTTPException(
+            status_code=400,
+            detail="No policy changes were supplied.",
+        )
+
+    ensure_no_active_recoveries(
+        db,
+        policy.id,
+    )
+
+    new_trustee_ids = updates.get(
+        "trustee_ids",
+        policy.trustee_ids,
+    )
+
+    if new_trustee_ids is None:
+        new_trustee_ids = policy.trustee_ids
+
+    if "trustee_ids" in updates:
+        load_and_validate_trustees(
+            db,
+            new_trustee_ids,
+        )
+    elif updates.get("active") is True:
+        load_and_validate_trustees(
+            db,
+            policy.trustee_ids,
+        )
+
+    new_policy_tree = updates.get(
+        "policy_tree",
+        policy.policy_tree,
+    )
+
+    if new_policy_tree is not None:
+        try:
+            validate_policy_tree(
+                new_policy_tree,
+                set(new_trustee_ids),
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=str(exc),
+            ) from exc
+
+    for field, value in updates.items():
+        setattr(policy, field, value)
+
+    policy.version += 1
+
+    db.add(policy)
+    db.commit()
+    db.refresh(policy)
+
+    return policy
+
+
+@router.post(
+    "/{policy_id}/deactivate",
+    response_model=PolicyResponse,
+)
+def deactivate_policy(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles("owner", "admin")),
+):
+    policy = get_policy_or_404(db, policy_id)
+
+    ensure_owner_or_admin(
+        user,
+        policy.owner_user_id,
+    )
+
+    if not policy.active:
+        return policy
+
+    ensure_no_active_recoveries(
+        db,
+        policy.id,
+    )
+
+    policy.active = False
+    policy.version += 1
+
+    db.commit()
+    db.refresh(policy)
+
     return policy

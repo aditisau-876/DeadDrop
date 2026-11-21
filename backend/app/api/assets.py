@@ -264,7 +264,6 @@ def create_asset(
     """
 
     policy = db.get(Policy, data.policy_id)
-
     if policy is None:
         raise HTTPException(
             status_code=404,
