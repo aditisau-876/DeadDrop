@@ -137,3 +137,23 @@ def test_rejects_duplicate_trustee():
 
     with pytest.raises(ValueError):
         validate_policy_tree(tree, {"A"})
+
+
+def test_minimum_approvals_for_composable_policy():
+    from app.services.access_structure import minimum_approvals
+
+    tree = {
+        "type": "OR",
+        "children": [
+            {"type": "AND", "children": [
+                {"type": "LEAF", "trustee_id": "a"},
+                {"type": "LEAF", "trustee_id": "b"},
+            ]},
+            {"type": "THRESHOLD", "threshold": 2, "children": [
+                {"type": "LEAF", "trustee_id": "c"},
+                {"type": "LEAF", "trustee_id": "d"},
+                {"type": "LEAF", "trustee_id": "e"},
+            ]},
+        ],
+    }
+    assert minimum_approvals(tree) == 2

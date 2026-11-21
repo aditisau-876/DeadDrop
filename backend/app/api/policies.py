@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import generate_identifier
+from app.core.security import generate_identifier, get_current_user, require_roles, ensure_owner_or_admin
 from app.db.database import get_db
 from app.models.policy import Policy
 from app.models.trustee import Trustee
@@ -13,6 +13,7 @@ from app.services.access_structure import validate_policy_tree
 
 router = APIRouter(
     prefix="/api/policies",
+    dependencies=[Depends(get_current_user)],
     tags=["Policies"],
 )
 
@@ -25,6 +26,7 @@ router = APIRouter(
 def create_policy(
     data: PolicyCreate,
     db: Session = Depends(get_db),
+    user = Depends(require_roles("owner", "admin")),
 ):
 
 
@@ -85,6 +87,7 @@ def create_policy(
 
     policy = Policy(
         id=generate_identifier(),
+        owner_user_id=user.id,
         name=data.name,
         description=data.description,
         policy_expression=data.policy_expression,
@@ -110,12 +113,11 @@ def create_policy(
 )
 def list_policies(
     db: Session = Depends(get_db),
+    user = Depends(get_current_user),
 ):
-    policies = db.scalars(
-        select(Policy).order_by(
-            Policy.created_at
-        )
-    ).all()
+    query = select(Policy).order_by(Policy.created_at)
+    if user.role != "admin": query = query.where(Policy.owner_user_id == user.id)
+    policies = db.scalars(query).all()
 
     return list(policies)
 
@@ -127,6 +129,7 @@ def list_policies(
 def get_policy(
     policy_id: str,
     db: Session = Depends(get_db),
+    user = Depends(get_current_user),
 ):
     policy = db.get(
         Policy,
@@ -134,9 +137,6 @@ def get_policy(
     )
 
     if policy is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Policy not found.",
-        )
-
+        raise HTTPException(status_code=404, detail="Policy not found.")
+    ensure_owner_or_admin(user, policy.owner_user_id)
     return policy

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.core.security import generate_identifier, get_current_user, require_roles, ensure_owner_or_admin
 from app.models.policy import Policy
 from app.models.recovery import RecoveryApproval, RecoveryRequest
 from app.models.trustee import Trustee
@@ -16,7 +17,7 @@ from app.schemas.recovery import (
     RecoveryApproval as RecoveryApprovalInput,
     RecoveryResponse,
 )
-from app.services.access_structure import evaluate
+from app.services.access_structure import evaluate, minimum_approvals
 from app.crypto.signatures import verify_approval_signature
 
 
@@ -45,6 +46,7 @@ def serialize_recovery(recovery: RecoveryRequest) -> dict:
 def create_recovery(
     data: RecoveryCreate,
     db: Session = Depends(get_db),
+    user = Depends(require_roles("owner", "admin")),
 ):
     policy = db.get(Policy, data.policy_id)
 
@@ -54,6 +56,7 @@ def create_recovery(
             detail="Policy not found.",
         )
 
+    ensure_owner_or_admin(user, policy.owner_user_id)
     if not policy.active:
         raise HTTPException(
             status_code=409,
@@ -67,12 +70,13 @@ def create_recovery(
         )
 
     recovery = RecoveryRequest(
+        id=generate_identifier(),
         policy_id=policy.id,
         reason=data.reason,
         incident_hash=data.incident_hash,
         status="PENDING",
         approvals=0,
-        required_approvals=3,
+        required_approvals=minimum_approvals(policy.policy_tree),
         policy_version=policy.version,
         policy_epoch=policy.epoch,
     )
@@ -91,15 +95,16 @@ def create_recovery(
 def get_recovery(
     recovery_id: str,
     db: Session = Depends(get_db),
+    user = Depends(get_current_user),
 ):
     recovery = db.get(RecoveryRequest, recovery_id)
 
     if recovery is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Recovery request not found.",
-        )
+        raise HTTPException(status_code=404, detail="Recovery request not found.")
 
+    policy = db.get(Policy, recovery.policy_id)
+    if policy is not None:
+        ensure_owner_or_admin(user, policy.owner_user_id)
     return serialize_recovery(recovery)
 
 
@@ -111,6 +116,7 @@ def approve_recovery(
     recovery_id: str,
     data: RecoveryApprovalInput,
     db: Session = Depends(get_db),
+    user = Depends(require_roles("trustee", "admin")),
 ):
     if data.recovery_id != recovery_id:
         raise HTTPException(
@@ -165,6 +171,9 @@ def approve_recovery(
             detail="Trustee does not exist or is inactive.",
         )
 
+    if user.role == "trustee" and trustee.user_id != user.id:
+        raise HTTPException(status_code=403, detail="This account is not linked to the requested trustee.")
+
     if data.trustee_id not in policy.trustee_ids:
         raise HTTPException(
             status_code=403,
@@ -203,6 +212,7 @@ def approve_recovery(
         )
 
     approval = RecoveryApproval(
+        id=generate_identifier(),
         recovery_id=recovery.id,
         trustee_id=trustee.id,
         signature=data.signature,

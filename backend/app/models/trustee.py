@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -15,6 +15,8 @@ class Trustee(Base):
         String(64),
         primary_key=True,
     )
+
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), unique=True, index=True, nullable=True)
 
     name: Mapped[str] = mapped_column(
         String(120),
