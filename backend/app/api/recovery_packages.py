@@ -33,11 +33,12 @@ from app.schemas.recovery_package import (
     ShareReleaseRequest,
     ShareReleaseResponse,
 )
-from app.core.security import generate_identifier
+from app.core.security import generate_identifier, get_current_user, require_roles
 
 
 router = APIRouter(
     prefix="/api/recovery-packages",
+    dependencies=[Depends(get_current_user)],
     tags=["Recovery Packages"],
 )
 
@@ -183,6 +184,7 @@ def get_release_context(
 def create_share_release_challenge(
     data: ShareReleaseChallengeRequest,
     db: Session = Depends(get_db),
+    user = Depends(require_roles("trustee", "admin")),
 ):
     recovery, policy, asset, trustee, _ = get_release_context(
         recovery_id=data.recovery_id,
@@ -190,6 +192,9 @@ def create_share_release_challenge(
         trustee_id=data.trustee_id,
         db=db,
     )
+
+    if user.role == "trustee" and trustee.user_id != user.id:
+        raise HTTPException(status_code=403, detail="This account is not linked to the requested trustee.")
 
     now = datetime.utcnow()
 
@@ -210,6 +215,8 @@ def create_share_release_challenge(
         asset_id=asset.id,
         trustee_id=trustee.id,
         nonce_hash=nonce_hash,
+        policy_version=policy.version,
+        policy_epoch=policy.epoch,
         expires_at=expires_at,
         consumed_at=None,
     )
@@ -224,6 +231,7 @@ def create_share_release_challenge(
         asset_id=asset.id,
         policy_id=policy.id,
         trustee_id=trustee.id,
+        policy_version=policy.version,
         epoch=asset.epoch,
     )
 
@@ -241,6 +249,7 @@ def create_share_release_challenge(
 def release_encrypted_share(
     data: ShareReleaseRequest,
     db: Session = Depends(get_db),
+    user = Depends(require_roles("trustee", "admin")),
 ):
     recovery, policy, asset, trustee, share = get_release_context(
         recovery_id=data.recovery_id,
@@ -248,6 +257,9 @@ def release_encrypted_share(
         trustee_id=data.trustee_id,
         db=db,
     )
+
+    if user.role == "trustee" and trustee.user_id != user.id:
+        raise HTTPException(status_code=403, detail="This account is not linked to the requested trustee.")
 
     challenge = db.get(
         ShareReleaseChallenge,
@@ -271,6 +283,15 @@ def release_encrypted_share(
         )
 
     now = datetime.utcnow()
+
+    if (
+        challenge.policy_version != policy.version
+        or challenge.policy_epoch != policy.epoch
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Policy changed after the release challenge was issued.",
+        )
 
     if challenge.consumed_at is not None:
         raise HTTPException(
@@ -306,6 +327,7 @@ def release_encrypted_share(
         asset_id=asset.id,
         policy_id=policy.id,
         trustee_id=trustee.id,
+        policy_version=policy.version,
         epoch=asset.epoch,
     )
 

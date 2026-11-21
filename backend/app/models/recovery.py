@@ -155,6 +155,16 @@ class ShareReleaseChallenge(Base):
         nullable=False,
     )
 
+    policy_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    policy_epoch: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
     expires_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,

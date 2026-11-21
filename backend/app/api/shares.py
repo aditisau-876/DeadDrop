@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import generate_identifier
+from app.core.security import generate_identifier, get_current_user, require_roles, ensure_owner_or_admin
 from app.db.database import get_db
 from app.models.asset import ProtectedAsset
 from app.models.share import EncryptedShare
@@ -17,6 +17,7 @@ from app.schemas.share import (
 
 router = APIRouter(
     prefix="/api/shares",
+    dependencies=[Depends(get_current_user)],
     tags=["Encrypted Shares"],
 )
 
@@ -29,6 +30,7 @@ router = APIRouter(
 def create_share(
     data: ShareCreate,
     db: Session = Depends(get_db),
+    user = Depends(require_roles("owner", "admin")),
 ):
     asset = db.get(
         ProtectedAsset,
@@ -36,10 +38,8 @@ def create_share(
     )
 
     if asset is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Protected asset not found.",
-        )
+        raise HTTPException(status_code=404, detail="Protected asset not found.")
+    ensure_owner_or_admin(user, asset.owner_user_id)
 
     trustee = db.get(
         Trustee,

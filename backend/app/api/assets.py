@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import generate_identifier
+from app.core.security import generate_identifier, get_current_user, require_roles, ensure_owner_or_admin
 from app.db.database import get_db
 from app.models.asset import ProtectedAsset
 from app.models.policy import Policy
@@ -27,6 +27,7 @@ from app.crypto.share_envelope import (
 
 router = APIRouter(
     prefix="/api/assets",
+    dependencies=[Depends(get_current_user)],
     tags=["Protected Assets"],
 )
 
@@ -51,6 +52,7 @@ def serialize_asset(asset: ProtectedAsset) -> AssetResponse:
 def protect_asset(
     data: AssetProtectionCreate,
     db: Session = Depends(get_db),
+    user = Depends(require_roles("owner", "admin")),
 ):
     """
     Store an encrypted asset and its trustee-encrypted
@@ -66,6 +68,8 @@ def protect_asset(
             status_code=404,
             detail="Policy not found.",
         )
+
+    ensure_owner_or_admin(user, policy.owner_user_id)
 
     if not policy.active:
         raise HTTPException(
@@ -157,34 +161,32 @@ def protect_asset(
     # These checks do not prove that the underlying Shamir shares
     # are mathematically valid.
     for share_data in data.shares:
-
-        if not validate_commitment_format(
-        share_data.commitment
-    ):
+        if not validate_commitment_format(share_data.commitment):
             raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "Invalid share commitment format.",
-                "trustee_id": share_data.trustee_id,
-            },
+                status_code=422,
+                detail={
+                    "message": "Invalid share commitment format.",
+                    "trustee_id": share_data.trustee_id,
+                },
+            )
+
+        valid, reason = validate_share_envelope(
+            share_data.encrypted_share,
+            expected_policy_id=policy.id,
+            expected_trustee_id=share_data.trustee_id,
+            expected_epoch=policy.epoch,
         )
 
-    valid, reason = validate_share_envelope(
-        share_data.encrypted_share,
-        expected_policy_id=policy.id,
-        expected_trustee_id=share_data.trustee_id,
-        expected_epoch=policy.epoch,
-    )
+        if not valid:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Invalid encrypted share envelope.",
+                    "trustee_id": share_data.trustee_id,
+                    "reason": reason,
+                },
+            )
 
-    if not valid:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "Invalid encrypted share envelope.",
-                "trustee_id": share_data.trustee_id,
-                "reason": reason,
-            },
-        )
     wrong_epochs = [
         share.trustee_id
         for share in data.shares
@@ -206,6 +208,7 @@ def protect_asset(
     # Create the protected asset.
     asset = ProtectedAsset(
         id=generate_identifier(),
+        owner_user_id=policy.owner_user_id,
         policy_id=policy.id,
         name=data.name,
         description=data.description,
@@ -251,6 +254,7 @@ def protect_asset(
 def create_asset(
     data: AssetCreate,
     db: Session = Depends(get_db),
+    user = Depends(require_roles("owner", "admin")),
 ):
     """
     Legacy encrypted-asset creation endpoint.
@@ -267,6 +271,8 @@ def create_asset(
             detail="Policy not found.",
         )
 
+    ensure_owner_or_admin(user, policy.owner_user_id)
+
     if not policy.active:
         raise HTTPException(
             status_code=400,
@@ -281,6 +287,7 @@ def create_asset(
 
     asset = ProtectedAsset(
         id=generate_identifier(),
+        owner_user_id=policy.owner_user_id,
         policy_id=policy.id,
         name=data.name,
         description=data.description,
@@ -304,12 +311,11 @@ def create_asset(
 )
 def list_assets(
     db: Session = Depends(get_db),
+    user = Depends(get_current_user),
 ):
-    assets = db.scalars(
-        select(ProtectedAsset).order_by(
-            ProtectedAsset.created_at
-        )
-    ).all()
+    query = select(ProtectedAsset).order_by(ProtectedAsset.created_at)
+    if user.role != "admin": query = query.where(ProtectedAsset.owner_user_id == user.id)
+    assets = db.scalars(query).all()
 
     return [
         serialize_asset(asset)
@@ -323,6 +329,7 @@ def list_assets(
 def get_asset_readiness(
     asset_id: str,
     db: Session = Depends(get_db),
+    user = Depends(get_current_user),
 ):
     """
     Calculate structural recovery readiness.
@@ -337,10 +344,8 @@ def get_asset_readiness(
     )
 
     if asset is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Protected asset not found.",
-        )
+        raise HTTPException(status_code=404, detail="Protected asset not found.")
+    ensure_owner_or_admin(user, asset.owner_user_id)
 
     return calculate_recovery_readiness(
         db,
@@ -355,6 +360,7 @@ def get_asset_readiness(
 def get_asset(
     asset_id: str,
     db: Session = Depends(get_db),
+    user = Depends(get_current_user),
 ):
     asset = db.get(
         ProtectedAsset,
@@ -367,4 +373,5 @@ def get_asset(
             detail="Protected asset not found.",
         )
 
+    ensure_owner_or_admin(user, asset.owner_user_id)
     return serialize_asset(asset)

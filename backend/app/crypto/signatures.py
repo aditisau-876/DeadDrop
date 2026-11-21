@@ -108,6 +108,7 @@ def build_share_release_typed_data(
     asset_id: str,
     policy_id: str,
     trustee_id: str,
+    policy_version: int,
     epoch: int,
 ) -> dict:
     return {
@@ -125,6 +126,7 @@ def build_share_release_typed_data(
                 {"name": "assetId", "type": "string"},
                 {"name": "policyId", "type": "string"},
                 {"name": "trusteeId", "type": "string"},
+                {"name": "policyVersion", "type": "uint256"},
                 {"name": "epoch", "type": "uint256"},
             ],
         },
@@ -137,6 +139,7 @@ def build_share_release_typed_data(
             "assetId": asset_id,
             "policyId": policy_id,
             "trusteeId": trustee_id,
+            "policyVersion": policy_version,
             "epoch": epoch,
         },
     }
@@ -152,6 +155,7 @@ def verify_share_release_signature(
     asset_id: str,
     policy_id: str,
     trustee_id: str,
+    policy_version: int,
     epoch: int,
 ) -> bool:
     if not expected_wallet:
@@ -165,6 +169,7 @@ def verify_share_release_signature(
             asset_id=asset_id,
             policy_id=policy_id,
             trustee_id=trustee_id,
+            policy_version=policy_version,
             epoch=epoch,
         )
 
@@ -185,42 +190,3 @@ def verify_share_release_signature(
     except (ValueError, TypeError, KeyError):
         return False
 
-
-def verify_share_release_signature(
-    *,
-    signature: str,
-    expected_wallet: str,
-    recovery_id: str,
-    asset_id: str,
-    policy_id: str,
-    trustee_id: str,
-    epoch: int,
-) -> bool:
-    if not expected_wallet:
-        return False
-
-    try:
-        typed_data = build_share_release_typed_data(
-            recovery_id=recovery_id,
-            asset_id=asset_id,
-            policy_id=policy_id,
-            trustee_id=trustee_id,
-            epoch=epoch,
-        )
-
-        signable_message = encode_typed_data(
-            full_message=typed_data
-        )
-
-        recovered_address = Account.recover_message(
-            signable_message,
-            signature=signature,
-        )
-
-        return (
-            recovered_address.lower()
-            == expected_wallet.lower()
-        )
-
-    except (ValueError, TypeError, KeyError):
-        return False

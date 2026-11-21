@@ -1,10 +1,6 @@
-
 import { useState } from "react";
-
 import { Page } from "../components/Page";
-
-import { apiRequest } from "../lib/api";
-
+import { authApiRequest as apiRequest } from "../lib/authApi";
 import {
   decryptTrusteeShare,
   verifyShareCommitment,

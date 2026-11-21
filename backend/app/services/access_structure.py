@@ -132,3 +132,35 @@ def evaluate(
         return sum(results) >= threshold
 
     raise ValueError(f"Unsupported policy node type: {node_type}")
+
+
+def minimum_approvals(node: dict[str, Any]) -> int:
+    """Return the smallest number of trustee approvals satisfying a valid tree.
+
+    This is a display hint only; authorization always uses ``evaluate`` against
+    the actual set of signed trustee approvals.
+    """
+    node_type = node.get("type")
+    if node_type == "LEAF":
+        return 1
+
+    children = node.get("children")
+    if not isinstance(children, list) or not children:
+        raise ValueError("Invalid policy children.")
+
+    costs = sorted(minimum_approvals(child) for child in children)
+    if node_type == "AND":
+        return sum(costs)
+    if node_type == "OR":
+        return costs[0]
+    if node_type == "THRESHOLD":
+        threshold = node.get("threshold")
+        if (
+            not isinstance(threshold, int)
+            or isinstance(threshold, bool)
+            or threshold < 1
+            or threshold > len(costs)
+        ):
+            raise ValueError("Invalid threshold.")
+        return sum(costs[:threshold])
+    raise ValueError(f"Unsupported policy node type: {node_type}")

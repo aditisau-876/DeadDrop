@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import generate_identifier
+from app.core.security import generate_identifier, get_current_user, require_roles, ensure_owner_or_admin
 from app.db.database import get_db
 from app.models.trustee import Trustee
 from app.schemas.trustee import TrusteeCreate, TrusteeResponse
@@ -12,6 +12,7 @@ from app.schemas.trustee import TrusteeCreate, TrusteeResponse
 
 router = APIRouter(
     prefix="/api/trustees",
+    dependencies=[Depends(get_current_user)],
     tags=["Trustees"],
 )
 
@@ -24,6 +25,7 @@ router = APIRouter(
 def create_trustee(
     data: TrusteeCreate,
     db: Session = Depends(get_db),
+    user = Depends(require_roles("admin")),
 ):
     trustee = Trustee(
         id=generate_identifier(),
