@@ -34,7 +34,10 @@ from app.schemas.recovery_package import (
     ShareReleaseResponse,
 )
 from app.core.security import generate_identifier, get_current_user, require_roles
-
+from app.services.recovery_lifecycle import (
+    expire_recovery_if_needed,
+    recovery_release_block_reason,
+)
 
 router = APIRouter(
     prefix="/api/recovery-packages",
@@ -62,12 +65,15 @@ def get_release_context(
             status_code=404,
             detail="Recovery request not found.",
         )
+    if expire_recovery_if_needed(recovery):
+        db.commit()
+    release_block_reason = recovery_release_block_reason(recovery)
 
-    if recovery.status != "APPROVED":
-        raise HTTPException(
-            status_code=409,
-            detail="Governance approval is not complete.",
-        )
+    if recovery.status == "EXPIRED":
+        db.commit()
+
+    if release_block_reason:
+        raise HTTPException(status_code=409,detail=release_block_reason,)
 
     policy = db.get(
         Policy,

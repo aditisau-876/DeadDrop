@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -42,10 +43,12 @@ class RecoveryRequest(Base):
         nullable=False,
     )
 
+    # PENDING, APPROVED, CANCELLED, EXPIRED, EXECUTED
     status: Mapped[str] = mapped_column(
         String(32),
         default="PENDING",
         nullable=False,
+        index=True,
     )
 
     approvals: Mapped[int] = mapped_column(
@@ -68,6 +71,33 @@ class RecoveryRequest(Base):
     policy_epoch: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
+    )
+
+    # Deadline for the entire recovery request.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    # Set only after the policy approval conditions are satisfied.
+    execute_after: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    cancellation_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -149,7 +179,6 @@ class ShareReleaseChallenge(Base):
         nullable=False,
     )
 
-    # Store only the SHA-256 hash of the random nonce.
     nonce_hash: Mapped[str] = mapped_column(
         String(64),
         nullable=False,

@@ -1,7 +1,18 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { authApiRequest } from "../lib/authApi";
-import { clearAccessToken, getAccessToken, saveAccessToken } from "./authStorage";
+import {
+  clearAccessToken,
+  getAccessToken,
+  saveAccessToken,
+} from "./authStorage";
 
 export type UserRole = "owner" | "trustee" | "admin";
 
@@ -13,7 +24,7 @@ export interface AuthUser {
   is_active: boolean;
 }
 
-interface AuthResponse {
+interface AuthTokenResponse {
   access_token: string;
   token_type: string;
   expires_in: number;
@@ -37,11 +48,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshUser = useCallback(async () => {
-    if (!getAccessToken()) {
+    const token = getAccessToken();
+    if (!token) {
       setUser(null);
       setIsLoading(false);
       return;
     }
+
     try {
       const currentUser = await authApiRequest<AuthUser>("/api/auth/me");
       setUser(currentUser);
@@ -58,18 +71,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const result = await authApiRequest<AuthResponse>("/api/auth/login", {
+    const result = await authApiRequest<AuthTokenResponse>("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email: email.trim(), password }),
     });
     saveAccessToken(result.access_token);
     setUser(result.user);
   }, []);
 
   const register = useCallback(async (fullName: string, email: string, password: string) => {
-    const result = await authApiRequest<AuthResponse>("/api/auth/register", {
+    // The backend returns a token response and signs the new owner in.
+    const result = await authApiRequest<AuthTokenResponse>("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ full_name: fullName, email, password }),
+      body: JSON.stringify({
+        full_name: fullName.trim(),
+        email: email.trim(),
+        password,
+      }),
     });
     saveAccessToken(result.access_token);
     setUser(result.user);

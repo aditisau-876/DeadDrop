@@ -1,7 +1,7 @@
 import { clearAccessToken, getAccessToken } from "../auth/authStorage";
 
 const configuredBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
-const API_BASE = configuredBase.replace(/\/$/, "");
+const API_BASE = configuredBase.replace(/\/+$/, "");
 
 function endpoint(path: string): string {
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
@@ -11,7 +11,10 @@ function endpoint(path: string): string {
   return `${API_BASE}${cleanPath}`;
 }
 
-export async function authApiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function authApiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -24,16 +27,28 @@ export async function authApiRequest<T>(path: string, options: RequestInit = {})
   try {
     response = await fetch(endpoint(path), { ...options, headers });
   } catch {
-    throw new Error("Cannot connect to the DeadDrop backend. Check that the backend is running and VITE_API_BASE_URL is correct.");
+    throw new Error(
+      "Cannot connect to the DeadDrop backend. Check that the backend is running and VITE_API_BASE_URL is correct.",
+    );
   }
 
-  if (response.status === 401 && path.endsWith("/me")) {
+  const payload = await response.json().catch(() => null) as
+    | { detail?: unknown }
+    | null;
+
+  if (response.status === 401) {
     clearAccessToken();
   }
 
-  const payload = await response.json().catch(() => null) as { detail?: string } | null;
   if (!response.ok) {
-    throw new Error(payload?.detail || `Request failed (${response.status}).`);
+    const detail = payload?.detail;
+    const message = typeof detail === "string"
+      ? detail
+      : detail !== undefined
+        ? JSON.stringify(detail)
+        : `Request failed (${response.status}).`;
+    throw new Error(message);
   }
+
   return payload as T;
 }

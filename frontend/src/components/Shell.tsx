@@ -1,20 +1,33 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
-const links = [
+const ownerLinks = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/policies", label: "Policies" },
-  { to: "/recovery", label: "Recovery" },
   { to: "/readiness", label: "Readiness" },
+  { to: "/recovery", label: "Recovery" },
+];
+
+const trusteeLinks = [
+  { to: "/dashboard", label: "Dashboard" },
+  { to: "/recovery", label: "Share Release" },
+];
+
+const adminLinks = [
+  { to: "/dashboard", label: "Dashboard" },
+  { to: "/policies", label: "Policies" },
+  { to: "/readiness", label: "Readiness" },
+  { to: "/recovery", label: "Recovery" },
+  { to: "/admin", label: "Administration" },
 ];
 
 function DeadDropMark() {
   return (
     <svg className="console-mark" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <polyline points="18,7 23,13 28,7" stroke="currentColor" strokeWidth="3" strokeLinecap="butt" strokeLinejoin="miter" />
-      <polyline points="18,39 23,33 28,39" stroke="currentColor" strokeWidth="3" strokeLinecap="butt" strokeLinejoin="miter" />
-      <polyline points="7,18 13,23 7,28" stroke="currentColor" strokeWidth="3" strokeLinecap="butt" strokeLinejoin="miter" />
-      <polyline points="39,18 33,23 39,28" stroke="currentColor" strokeWidth="3" strokeLinecap="butt" strokeLinejoin="miter" />
+      <polyline points="18,7 23,13 28,7" stroke="currentColor" strokeWidth="3" />
+      <polyline points="18,39 23,33 28,39" stroke="currentColor" strokeWidth="3" />
+      <polyline points="7,18 13,23 7,28" stroke="currentColor" strokeWidth="3" />
+      <polyline points="39,18 33,23 39,28" stroke="currentColor" strokeWidth="3" />
       <rect x="18.5" y="18.5" width="9" height="9" stroke="currentColor" strokeWidth="3" />
     </svg>
   );
@@ -23,6 +36,11 @@ function DeadDropMark() {
 export function Shell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const links = user?.role === "admin"
+    ? adminLinks
+    : user?.role === "trustee"
+      ? trusteeLinks
+      : ownerLinks;
 
   function handleLogout() {
     logout();
@@ -34,13 +52,23 @@ export function Shell() {
       <header className="console-header">
         <NavLink className="console-brand" to="/dashboard" aria-label="DeadDrop dashboard">
           <DeadDropMark />
-          <span className="console-wordwrap"><span className="console-word">DeadDrop</span><span className="console-brand-caption">RECOVERY PROTOCOL</span></span>
+          <span className="console-wordwrap">
+            <span className="console-word">DeadDrop</span>
+            <span className="console-brand-caption">RECOVERY PROTOCOL</span>
+          </span>
         </NavLink>
         <nav className="console-nav" aria-label="Console navigation">
-          {links.map(({ to, label }) => <NavLink key={to} to={to} className={({ isActive }) => isActive ? "console-nav-link active" : "console-nav-link"}>{label}</NavLink>)}
+          {links.map(({ to, label }) => (
+            <NavLink key={to} to={to} className={({ isActive }) => isActive ? "console-nav-link active" : "console-nav-link"}>
+              {label}
+            </NavLink>
+          ))}
         </nav>
         <div className="console-user-area">
-          <div className="console-user-copy"><strong>{user?.full_name}</strong><span>{user?.role?.toUpperCase()} ACCESS</span></div>
+          <div className="console-user-copy">
+            <strong>{user?.full_name}</strong>
+            <span>{user?.role?.toUpperCase()} ACCESS</span>
+          </div>
           <button className="console-logout" type="button" onClick={handleLogout}>SIGN OUT</button>
         </div>
       </header>

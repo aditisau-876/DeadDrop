@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -9,6 +10,8 @@ class TrusteeCreate(BaseModel):
     wallet_address: str | None = None
     public_key: str | None = None
 
+class TrusteeStatusUpdate(BaseModel):
+    active: bool
 
 class TrusteeResponse(BaseModel):
     id: str
