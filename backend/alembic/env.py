@@ -14,6 +14,7 @@ from app.models.policy import Policy
 from app.models.recovery import (
     RecoveryApproval,
     RecoveryRequest,
+    ShareReleaseChallenge,
 )
 from app.models.share import EncryptedShare
 from app.models.trustee import Trustee

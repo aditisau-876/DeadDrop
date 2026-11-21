@@ -1,7 +1,5 @@
-from fastapi import APIRouter
 
-from app.crypto.commitments import create_share_commitment
-from app.schemas import ShareReadinessResponse
+from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter(
     prefix="/api/readiness",
@@ -9,30 +7,26 @@ router = APIRouter(
 )
 
 
-@router.get(
-    "/{policy_id}/{trustee_id}",
-    response_model=ShareReadinessResponse,
-)
-def get_readiness(
+@router.get("/{policy_id}/{trustee_id}")
+def deprecated_readiness_endpoint(
     policy_id: str,
     trustee_id: str,
 ):
-    # Temporary deterministic demonstration value.
-    # Real share commitments will come from the cryptographic
-    # provisioning workflow.
-    demo_share = f"demo-share:{trustee_id}"
+    """
+    Retired endpoint.
 
-    commitment = create_share_commitment(
-        demo_share,
-        policy_id=policy_id,
-        trustee_id=trustee_id,
-        epoch=1,
-    )
+    Readiness is asset-specific. A policy/trustee pair alone
+    cannot establish that a usable encrypted share exists.
+    """
 
-    return ShareReadinessResponse(
-        policy_id=policy_id,
-        trustee_id=trustee_id,
-        epoch=1,
-        commitment=commitment,
-        verified=True,
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "message": (
+                "This readiness endpoint has been retired. "
+                "Use GET /api/assets/{asset_id}/readiness instead."
+            ),
+            "policy_id": policy_id,
+            "trustee_id": trustee_id,
+        },
     )

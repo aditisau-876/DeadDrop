@@ -7,7 +7,15 @@ from eth_account.messages import encode_typed_data
 from app.core.config import settings
 
 
-ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+def _domain() -> dict:
+    return {
+        "name": "DeadDrop",
+        "version": "1",
+        "chainId": settings.blockchain_chain_id,
+        "verifyingContract": (
+            settings.blockchain_verifying_contract_address
+        ),
+    }
 
 
 def build_approval_typed_data(
@@ -19,8 +27,6 @@ def build_approval_typed_data(
     policy_version: int,
     policy_epoch: int,
 ) -> dict:
-    """Build the exact EIP-712 message that trustees must sign."""
-
     return {
         "types": {
             "EIP712Domain": [
@@ -39,12 +45,7 @@ def build_approval_typed_data(
             ],
         },
         "primaryType": "RecoveryApproval",
-        "domain": {
-            "name": "DeadDrop",
-            "version": "1",
-            "chainId": settings.blockchain_chain_id,
-            "verifyingContract": settings.blockchain_verifying_contract_address,
-        },
+        "domain": _domain(),
         "message": {
             "recoveryId": recovery_id,
             "policyId": policy_id,
@@ -67,8 +68,6 @@ def verify_approval_signature(
     policy_version: int,
     policy_epoch: int,
 ) -> bool:
-    """Return True only when the signature belongs to the expected wallet."""
-
     if not expected_wallet:
         return False
 
@@ -82,14 +81,146 @@ def verify_approval_signature(
             policy_epoch=policy_epoch,
         )
 
-        signable_message = encode_typed_data(full_message=typed_data)
+        signable_message = encode_typed_data(
+            full_message=typed_data
+        )
 
         recovered_address = Account.recover_message(
             signable_message,
             signature=signature,
         )
 
-        return recovered_address.lower() == expected_wallet.lower()
+        return (
+            recovered_address.lower()
+            == expected_wallet.lower()
+        )
+
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
+
+def build_share_release_typed_data(
+    *,
+    challenge_id: str,
+    nonce: str,
+    recovery_id: str,
+    asset_id: str,
+    policy_id: str,
+    trustee_id: str,
+    epoch: int,
+) -> dict:
+    return {
+        "types": {
+            "EIP712Domain": [
+                {"name": "name", "type": "string"},
+                {"name": "version", "type": "string"},
+                {"name": "chainId", "type": "uint256"},
+                {"name": "verifyingContract", "type": "address"},
+            ],
+            "ShareRelease": [
+                {"name": "challengeId", "type": "string"},
+                {"name": "nonce", "type": "string"},
+                {"name": "recoveryId", "type": "string"},
+                {"name": "assetId", "type": "string"},
+                {"name": "policyId", "type": "string"},
+                {"name": "trusteeId", "type": "string"},
+                {"name": "epoch", "type": "uint256"},
+            ],
+        },
+        "primaryType": "ShareRelease",
+        "domain": _domain(),
+        "message": {
+            "challengeId": challenge_id,
+            "nonce": nonce,
+            "recoveryId": recovery_id,
+            "assetId": asset_id,
+            "policyId": policy_id,
+            "trusteeId": trustee_id,
+            "epoch": epoch,
+        },
+    }
+
+
+def verify_share_release_signature(
+    *,
+    signature: str,
+    expected_wallet: str,
+    challenge_id: str,
+    nonce: str,
+    recovery_id: str,
+    asset_id: str,
+    policy_id: str,
+    trustee_id: str,
+    epoch: int,
+) -> bool:
+    if not expected_wallet:
+        return False
+
+    try:
+        typed_data = build_share_release_typed_data(
+            challenge_id=challenge_id,
+            nonce=nonce,
+            recovery_id=recovery_id,
+            asset_id=asset_id,
+            policy_id=policy_id,
+            trustee_id=trustee_id,
+            epoch=epoch,
+        )
+
+        signable_message = encode_typed_data(
+            full_message=typed_data
+        )
+
+        recovered_address = Account.recover_message(
+            signable_message,
+            signature=signature,
+        )
+
+        return (
+            recovered_address.lower()
+            == expected_wallet.lower()
+        )
+
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
+def verify_share_release_signature(
+    *,
+    signature: str,
+    expected_wallet: str,
+    recovery_id: str,
+    asset_id: str,
+    policy_id: str,
+    trustee_id: str,
+    epoch: int,
+) -> bool:
+    if not expected_wallet:
+        return False
+
+    try:
+        typed_data = build_share_release_typed_data(
+            recovery_id=recovery_id,
+            asset_id=asset_id,
+            policy_id=policy_id,
+            trustee_id=trustee_id,
+            epoch=epoch,
+        )
+
+        signable_message = encode_typed_data(
+            full_message=typed_data
+        )
+
+        recovered_address = Account.recover_message(
+            signable_message,
+            signature=signature,
+        )
+
+        return (
+            recovered_address.lower()
+            == expected_wallet.lower()
+        )
 
     except (ValueError, TypeError, KeyError):
         return False

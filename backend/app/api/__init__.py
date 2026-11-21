@@ -5,7 +5,7 @@ from app.api.readiness import router as readiness_router
 from app.api.recovery import router as recovery_router
 from app.api.shares import router as shares_router
 from app.api.trustees import router as trustees_router
-
+from app.api.recovery_packages import router as recovery_packages_router
 
 __all__ = [
     "assets_router",
@@ -15,4 +15,5 @@ __all__ = [
     "recovery_router",
     "shares_router",
     "trustees_router",
+    "recovery_packages_router",
 ]

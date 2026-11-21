@@ -121,3 +121,52 @@ class RecoveryApproval(Base):
             name="uq_recovery_trustee_approval",
         ),
     )
+
+
+class ShareReleaseChallenge(Base):
+    __tablename__ = "share_release_challenges"
+
+    id: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+    )
+
+    recovery_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("recovery_requests.id"),
+        nullable=False,
+    )
+
+    asset_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("protected_assets.id"),
+        nullable=False,
+    )
+
+    trustee_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("trustees.id"),
+        nullable=False,
+    )
+
+    # Store only the SHA-256 hash of the random nonce.
+    nonce_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )

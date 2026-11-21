@@ -19,6 +19,10 @@ from app.schemas.asset import (
 from app.services.recovery_readiness import (
     calculate_recovery_readiness,
 )
+from app.crypto.share_envelope import (
+    validate_commitment_format,
+    validate_share_envelope,
+)
 
 
 router = APIRouter(
@@ -149,6 +153,38 @@ def protect_asset(
         )
 
     # All supplied shares must belong to the current policy epoch.
+    # Validate the commitment format and encrypted envelope metadata.
+    # These checks do not prove that the underlying Shamir shares
+    # are mathematically valid.
+    for share_data in data.shares:
+
+        if not validate_commitment_format(
+        share_data.commitment
+    ):
+            raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Invalid share commitment format.",
+                "trustee_id": share_data.trustee_id,
+            },
+        )
+
+    valid, reason = validate_share_envelope(
+        share_data.encrypted_share,
+        expected_policy_id=policy.id,
+        expected_trustee_id=share_data.trustee_id,
+        expected_epoch=policy.epoch,
+    )
+
+    if not valid:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Invalid encrypted share envelope.",
+                "trustee_id": share_data.trustee_id,
+                "reason": reason,
+            },
+        )
     wrong_epochs = [
         share.trustee_id
         for share in data.shares
