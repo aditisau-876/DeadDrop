@@ -10,7 +10,10 @@ from app.models.recovery import (
 from app.models.share import EncryptedShare
 from app.models.trustee import Trustee
 from app.models.user import User
-
+from app.models.blockchain_event import (
+    BlockchainEvent,
+    BlockchainSyncCheckpoint,
+)
 __all__ = [
     "ProtectedAsset",
     "AuditLog",
@@ -21,4 +24,6 @@ __all__ = [
     "EncryptedShare",
     "Trustee",
     "User",
+    "BlockchainEvent",
+    "BlockchainSyncCheckpoint",
 ]

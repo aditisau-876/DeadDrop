@@ -16,6 +16,10 @@ from app.models.recovery import (
     RecoveryRequest,
     ShareReleaseChallenge,
 )
+from app.models.blockchain_event import (
+    BlockchainEvent,
+    BlockchainSyncCheckpoint,
+)
 from app.models.share import EncryptedShare
 from app.models.trustee import Trustee
 from app.models.user import User
