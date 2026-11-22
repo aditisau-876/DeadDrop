@@ -8,6 +8,7 @@ from app.api import (
     auth_router,
     assets_router,
     audit_logs_router,
+    blockchain_router,
     health_router,
     policies_router,
     recovery_router,
@@ -16,11 +17,12 @@ from app.api import (
     trustees_router,
     share_rotation_router,
 )
-from app.blockchain import BlockchainClient
 from app.core.config import settings
 from app.db.database import SessionLocal
 from app.services.audit_log import record_request_safely
-
+from app.api.blockchain_events import (
+    router as blockchain_events_router,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ app = FastAPI(
         "Publicly Verifiable, Policy-Composable "
         "Emergency Recovery Protocol"
     ),
-    version="0.1.0",
+    version="0.2.0",
 )
 
 
@@ -54,18 +56,16 @@ async def audit_mutating_requests(
     call_next,
 ):
     """
-    Record metadata for every state-changing API request.
-
-    No request body or secret material is stored.
+    Record metadata for state-changing requests.
+    Request bodies and secret material are never stored.
     """
+
+    status_code = 500
 
     try:
         response = await call_next(request)
         status_code = response.status_code
-
-    except Exception:
-        status_code = 500
-        raise
+        return response
 
     finally:
         if request.method.upper() in {
@@ -80,15 +80,10 @@ async def audit_mutating_requests(
                 record_request_safely(
                     db=db,
                     request=request,
-                    status_code=locals().get(
-                        "status_code",
-                        500,
-                    ),
+                    status_code=status_code,
                 )
             finally:
                 db.close()
-
-    return response
 
 
 app.include_router(health_router)
@@ -101,27 +96,15 @@ app.include_router(assets_router)
 app.include_router(shares_router)
 app.include_router(audit_logs_router)
 app.include_router(share_rotation_router)
-
-blockchain = BlockchainClient(
-    rpc_url=settings.blockchain_rpc_url,
-    chain_id=settings.blockchain_chain_id,
-)
-
+app.include_router(blockchain_router)
+app.include_router(blockchain_events_router)
 
 @app.get("/")
 def root():
     return {
         "service": "DeadDrop",
         "status": "operational",
-        "version": "0.1.0",
+        "version": "0.2.0",
     }
 
 
-@app.get("/api/blockchain/status")
-def blockchain_status():
-    return {
-        "configured_chain_id": blockchain.chain_id,
-        "connected": blockchain.connected,
-        "network_chain_id": blockchain.get_chain_id(),
-        "block_number": blockchain.get_block_number(),
-    }
