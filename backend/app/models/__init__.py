@@ -1,4 +1,3 @@
-
 from app.models.asset import ProtectedAsset
 from app.models.audit_log import AuditLog
 from app.models.policy import Policy
@@ -14,6 +13,10 @@ from app.models.blockchain_event import (
     BlockchainEvent,
     BlockchainSyncCheckpoint,
 )
+from app.models.blockchain_projection import (
+    BlockchainRecoveryProjection,
+)
+
 __all__ = [
     "ProtectedAsset",
     "AuditLog",
@@ -26,4 +29,5 @@ __all__ = [
     "User",
     "BlockchainEvent",
     "BlockchainSyncCheckpoint",
+    "BlockchainRecoveryProjection",
 ]

@@ -10,7 +10,12 @@ from app.blockchain.indexer import sync_contract_events
 from app.core.security import require_roles
 from app.db.database import get_db
 from app.models.blockchain_event import BlockchainEvent
-
+from app.models.blockchain_projection import (
+    BlockchainRecoveryProjection,
+)
+from app.blockchain.reconciliation import (
+    reconcile_blockchain_state,
+)
 
 router = APIRouter(
     prefix="/api/blockchain/events",
@@ -119,3 +124,89 @@ def list_blockchain_events(
         }
         for event in events
     ]
+
+@router.get("/recoveries")
+def list_blockchain_recovery_projections(
+    state: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    admin=Depends(require_roles("admin")),
+):
+    query = select(BlockchainRecoveryProjection)
+
+    if state:
+        query = query.where(
+            BlockchainRecoveryProjection.state == state.upper()
+        )
+
+    query = (
+        query
+        .order_by(
+            BlockchainRecoveryProjection.last_event_block.desc()
+        )
+        .offset(offset)
+        .limit(limit)
+    )
+
+    projections = db.scalars(query).all()
+
+    return [
+        {
+            "id": item.id,
+            "chain_id": item.chain_id,
+            "contract_address": item.contract_address,
+            "recovery_key": item.recovery_key,
+            "recovery_id": item.recovery_id,
+            "policy_key": item.policy_key,
+            "requester": item.requester,
+            "state": item.state,
+            "approvals": item.approvals,
+            "execute_after": (
+                item.execute_after.isoformat()
+                if item.execute_after else None
+            ),
+            "expires_at": (
+                item.expires_at.isoformat()
+                if item.expires_at else None
+            ),
+            "requested_at": (
+                item.requested_at.isoformat()
+                if item.requested_at else None
+            ),
+            "completed_at": (
+                item.completed_at.isoformat()
+                if item.completed_at else None
+            ),
+            "cancelled_at": (
+                item.cancelled_at.isoformat()
+                if item.cancelled_at else None
+            ),
+            "artifact_hash": item.artifact_hash,
+            "last_event_block": item.last_event_block,
+            "last_event_transaction": item.last_event_transaction,
+            "updated_at": item.updated_at.isoformat(),
+        }
+        for item in projections
+    ]
+
+@router.get("/reconcile")
+def reconcile_blockchain(
+    db: Session = Depends(get_db),
+    admin=Depends(require_roles("admin")),
+):
+    try:
+        return reconcile_blockchain_state(db)
+
+    except (ConnectionError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Blockchain reconciliation failed.",
+        ) from exc
