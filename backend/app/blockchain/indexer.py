@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import os
@@ -5,16 +6,17 @@ import uuid
 
 from datetime import datetime
 from typing import Any
-
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select,text
 from sqlalchemy.orm import Session
 from web3 import Web3
 
-from app.blockchain.client import BlockchainClient
 from app.core.config import settings
 from app.models.blockchain_event import (
     BlockchainEvent,
     BlockchainSyncCheckpoint,
+)
+from app.models.blockchain_projection import (
+    BlockchainRecoveryProjection,
 )
 from app.models.recovery import RecoveryRequest
 
@@ -92,6 +94,14 @@ EVENT_ABI = [
 ]
 
 
+RECOVERY_EVENTS = {
+    "RecoveryRequested",
+    "ApprovalSubmitted",
+    "RecoveryExecuted",
+    "RecoveryCancelled",
+}
+
+
 def _hex(value: Any) -> str:
     if hasattr(value, "hex"):
         result = value.hex()
@@ -126,88 +136,157 @@ def _utc_timestamp(timestamp: int) -> datetime:
     return datetime.utcfromtimestamp(int(timestamp))
 
 
-def _recovery_for_key(
-    db: Session,
-    recovery_key: str,
-) -> RecoveryRequest | None:
-    normalized_key = recovery_key.lower()
+def _normalize_key(value: Any) -> str:
+    return _hex(value).lower()
+
+
+def _build_recovery_lookup(db: Session) -> dict[str, str]:
+    """
+    Maps on-chain keccak(recovery_id) values to database recovery IDs.
+    """
+    lookup: dict[str, str] = {}
 
     recoveries = db.scalars(
-        select(RecoveryRequest)
+        select(RecoveryRequest.id)
     ).all()
 
-    for recovery in recoveries:
-        expected = Web3.keccak(
-            text=recovery.id
-        ).hex().lower()
+    for recovery_id in recoveries:
+        key = Web3.keccak(text=recovery_id)
+        lookup[_normalize_key(key)] = recovery_id
 
-        if expected == normalized_key:
-            return recovery
-
-    return None
+    return lookup
 
 
-def _apply_recovery_event(
+def _rebuild_recovery_projections(
     db: Session,
-    event_name: str,
-    args: dict[str, Any],
-    block_timestamp: datetime | None,
-) -> None:
-    recovery_key = args.get("recoveryKey")
+    chain_id: int,
+    contract_address: str,
+) -> int:
+    """
+    Rebuild all projections for this contract from stored event history.
 
-    if recovery_key is None:
-        return
-
-    recovery = _recovery_for_key(
-        db,
-        _hex(recovery_key),
+    This is intentionally deterministic: replaying the same event history
+    produces the same projection state.
+    """
+    db.execute(
+        delete(BlockchainRecoveryProjection).where(
+            BlockchainRecoveryProjection.chain_id == chain_id,
+            BlockchainRecoveryProjection.contract_address == contract_address,
+        )
     )
+    db.flush()
 
-    if recovery is None:
-        return
+    recovery_lookup = _build_recovery_lookup(db)
 
-    if event_name == "RecoveryRequested":
-        execute_after = args.get("executeAfter")
-        expires_at = args.get("expiresAt")
+    events = db.scalars(
+        select(BlockchainEvent)
+        .where(
+            BlockchainEvent.chain_id == chain_id,
+            BlockchainEvent.contract_address == contract_address,
+            BlockchainEvent.event_name.in_(RECOVERY_EVENTS),
+        )
+        .order_by(
+            BlockchainEvent.block_number.asc(),
+            BlockchainEvent.transaction_index.asc(),
+            BlockchainEvent.log_index.asc(),
+        )
+    ).all()
 
-        if execute_after is not None:
-            recovery.execute_after = _utc_timestamp(
-                execute_after
+    projections: dict[str, BlockchainRecoveryProjection] = {}
+
+    for event in events:
+        args = event.event_args or {}
+        raw_key = args.get("recoveryKey")
+
+        if not raw_key:
+            continue
+
+        recovery_key = _normalize_key(raw_key)
+
+        projection = projections.get(recovery_key)
+
+        if projection is None:
+            projection = BlockchainRecoveryProjection(
+                id=uuid.uuid4().hex,
+                chain_id=chain_id,
+                contract_address=contract_address,
+                recovery_key=recovery_key,
+                recovery_id=recovery_lookup.get(recovery_key),
+                state="UNKNOWN",
+                approvals=0,
+                last_event_block=event.block_number,
+                last_event_transaction=event.transaction_hash,
+                updated_at=datetime.utcnow(),
+            )
+            projections[recovery_key] = projection
+
+        projection.last_event_block = event.block_number
+        projection.last_event_transaction = event.transaction_hash
+        projection.updated_at = datetime.utcnow()
+
+        if event.event_name == "RecoveryRequested":
+            projection.state = "REQUESTED"
+
+            policy_key = args.get("policyKey")
+            if policy_key:
+                projection.policy_key = str(policy_key).lower()
+
+            requester = args.get("requester")
+            if requester:
+                projection.requester = str(requester)
+
+            execute_after = args.get("executeAfter")
+            if execute_after is not None:
+                projection.execute_after = _utc_timestamp(
+                    int(execute_after)
+                )
+
+            expires_at = args.get("expiresAt")
+            if expires_at is not None:
+                projection.expires_at = _utc_timestamp(
+                    int(expires_at)
+                )
+
+            projection.requested_at = (
+                event.block_timestamp
             )
 
-        if expires_at is not None:
-            recovery.expires_at = _utc_timestamp(
-                expires_at
+        elif event.event_name == "ApprovalSubmitted":
+            projection.approvals = int(
+                args.get("approvals", projection.approvals)
             )
 
-    elif event_name == "ApprovalSubmitted":
-        recovery.approvals = int(
-            args.get("approvals", recovery.approvals)
-        )
+        elif event.event_name == "RecoveryExecuted":
+            projection.state = "EXECUTED"
+            projection.completed_at = event.block_timestamp
+
+            artifact_hash = args.get("artifactHash")
+            if artifact_hash:
+                projection.artifact_hash = str(
+                    artifact_hash
+                ).lower()
+
+        elif event.event_name == "RecoveryCancelled":
+            projection.state = "CANCELLED"
+            projection.cancelled_at = event.block_timestamp
+
+            cancelled_by = args.get("cancelledBy")
+            if cancelled_by:
+                projection.cancelled_by = str(cancelled_by)
+
+    for projection in projections.values():
+        db.add(projection)
+
+    db.flush()
+    return len(projections)
 
 
-    elif event_name == "RecoveryExecuted":
-        recovery.status = "EXECUTED"
-        recovery.completed_at = (
-            block_timestamp or datetime.utcnow()
-        )
-
-    elif event_name == "RecoveryCancelled":
-        recovery.status = "CANCELLED"
-        recovery.cancelled_at = (
-            block_timestamp or datetime.utcnow()
-        )
-        recovery.cancellation_reason = (
-            "Cancelled on-chain."
-        )
-
-
-def sync_contract_events(
+def _sync_contract_events_unlocked(
     db: Session,
     max_blocks: int | None = None,
 ) -> dict[str, Any]:
     rpc_url = settings.blockchain_rpc_url
-    configured_chain_id = settings.blockchain_chain_id
+    configured_chain_id = int(settings.blockchain_chain_id)
     contract_address = (
         settings.blockchain_verifying_contract_address
     )
@@ -237,9 +316,7 @@ def sync_contract_events(
             f"{configured_chain_id}, received {actual_chain_id}."
         )
 
-    address = Web3.to_checksum_address(
-        contract_address
-    )
+    address = Web3.to_checksum_address(contract_address)
 
     contract = web3.eth.contract(
         address=address,
@@ -248,34 +325,22 @@ def sync_contract_events(
 
     confirmations = max(
         0,
-        int(os.getenv(
-            "BLOCKCHAIN_INDEXER_CONFIRMATIONS",
-            "3",
-        )),
+        int(os.getenv("BLOCKCHAIN_INDEXER_CONFIRMATIONS", "3")),
     )
 
     chunk_size = max(
         1,
-        int(os.getenv(
-            "BLOCKCHAIN_INDEXER_CHUNK_SIZE",
-            "500",
-        )),
+        int(os.getenv("BLOCKCHAIN_INDEXER_CHUNK_SIZE", "500")),
     )
 
     reorg_window = max(
         1,
-        int(os.getenv(
-            "BLOCKCHAIN_INDEXER_REORG_WINDOW",
-            "12",
-        )),
+        int(os.getenv("BLOCKCHAIN_INDEXER_REORG_WINDOW", "12")),
     )
 
     start_block = max(
         0,
-        int(os.getenv(
-            "BLOCKCHAIN_INDEXER_START_BLOCK",
-            "0",
-        )),
+        int(os.getenv("BLOCKCHAIN_INDEXER_START_BLOCK", "0")),
     )
 
     latest_block = int(web3.eth.block_number)
@@ -287,14 +352,13 @@ def sync_contract_events(
             "latest_block": latest_block,
             "confirmed_block": confirmed_block,
             "indexed_events": 0,
+            "reorg_detected": False,
         }
 
     checkpoint = db.scalar(
         select(BlockchainSyncCheckpoint).where(
-            BlockchainSyncCheckpoint.chain_id
-            == configured_chain_id,
-            BlockchainSyncCheckpoint.contract_address
-            == address,
+            BlockchainSyncCheckpoint.chain_id == configured_chain_id,
+            BlockchainSyncCheckpoint.contract_address == address,
         )
     )
 
@@ -308,7 +372,9 @@ def sync_contract_events(
         db.add(checkpoint)
         db.flush()
 
-    # Verify the checkpoint block before continuing.
+    reorg_detected = False
+
+    # Verify the last indexed block against the canonical chain.
     if (
         checkpoint.last_processed_block >= start_block
         and checkpoint.last_block_hash
@@ -321,32 +387,26 @@ def sync_contract_events(
             canonical_block["hash"]
         )
 
-        if canonical_hash.lower() != (
-            checkpoint.last_block_hash.lower()
-        ):
+        if canonical_hash.lower() != checkpoint.last_block_hash.lower():
+            reorg_detected = True
+
             rewind_to = max(
                 start_block - 1,
-                checkpoint.last_processed_block
-                - reorg_window,
+                checkpoint.last_processed_block - reorg_window,
             )
 
             db.execute(
                 delete(BlockchainEvent).where(
-                    BlockchainEvent.chain_id
-                    == configured_chain_id,
-                    BlockchainEvent.contract_address
-                    == address,
-                    BlockchainEvent.block_number
-                    > rewind_to,
+                    BlockchainEvent.chain_id == configured_chain_id,
+                    BlockchainEvent.contract_address == address,
+                    BlockchainEvent.block_number > rewind_to,
                 )
             )
 
             checkpoint.last_processed_block = rewind_to
 
             if rewind_to >= start_block:
-                rewind_block = web3.eth.get_block(
-                    rewind_to
-                )
+                rewind_block = web3.eth.get_block(rewind_to)
                 checkpoint.last_block_hash = _hex(
                     rewind_block["hash"]
                 )
@@ -361,11 +421,23 @@ def sync_contract_events(
     )
 
     indexed_count = 0
+    processed_blocks = 0
     processed_until = checkpoint.last_processed_block
 
     while next_block <= confirmed_block:
+        remaining = (
+            max_blocks - processed_blocks
+            if max_blocks is not None
+            else chunk_size
+        )
+
+        if remaining <= 0:
+            break
+
+        blocks_this_chunk = min(chunk_size, remaining)
+
         end_block = min(
-            next_block + chunk_size - 1,
+            next_block + blocks_this_chunk - 1,
             confirmed_block,
         )
 
@@ -393,32 +465,22 @@ def sync_contract_events(
                     log["transactionHash"]
                 )
 
-                log_index = int(
-                    log["logIndex"]
-                )
+                log_index = int(log["logIndex"])
 
                 existing = db.scalar(
                     select(BlockchainEvent.id).where(
-                        BlockchainEvent.chain_id
-                        == configured_chain_id,
-                        BlockchainEvent.contract_address
-                        == address,
-                        BlockchainEvent.transaction_hash
-                        == transaction_hash,
-                        BlockchainEvent.log_index
-                        == log_index,
+                        BlockchainEvent.chain_id == configured_chain_id,
+                        BlockchainEvent.contract_address == address,
+                        BlockchainEvent.transaction_hash == transaction_hash,
+                        BlockchainEvent.log_index == log_index,
                     )
                 )
 
                 if existing is not None:
                     continue
 
-                args = dict(log["args"])
-
-                block = web3.eth.get_block(
-                    int(log["blockNumber"])
-                )
-
+                block_number = int(log["blockNumber"])
+                block = web3.eth.get_block(block_number)
                 timestamp = _utc_timestamp(
                     int(block["timestamp"])
                 )
@@ -427,39 +489,22 @@ def sync_contract_events(
                     id=uuid.uuid4().hex,
                     chain_id=configured_chain_id,
                     contract_address=address,
-                    block_number=int(
-                        log["blockNumber"]
-                    ),
-                    block_hash=_hex(
-                        log["blockHash"]
-                    ),
+                    block_number=block_number,
+                    block_hash=_hex(log["blockHash"]),
                     transaction_hash=transaction_hash,
-                    transaction_index=int(
-                        log["transactionIndex"]
-                    ),
+                    transaction_index=int(log["transactionIndex"]),
                     log_index=log_index,
                     event_name=event_name,
-                    event_args=_json_value(args),
+                    event_args=_json_value(dict(log["args"])),
                     block_timestamp=timestamp,
                 )
 
                 db.add(event_record)
-
-                _apply_recovery_event(
-                    db,
-                    event_name,
-                    args,
-                    timestamp,
-                )
-
                 indexed_count += 1
 
-        # Commit each completed chunk. This keeps large syncs manageable.
         db.flush()
 
-        end_block_data = web3.eth.get_block(
-            end_block
-        )
+        end_block_data = web3.eth.get_block(end_block)
 
         checkpoint.last_processed_block = end_block
         checkpoint.last_block_hash = _hex(
@@ -469,15 +514,20 @@ def sync_contract_events(
 
         db.commit()
 
+        processed_blocks += end_block - next_block + 1
         processed_until = end_block
         next_block = end_block + 1
 
-        if (
-            max_blocks is not None
-            and processed_until - start_block + 1
-            >= max_blocks
-        ):
-            break
+    # Always rebuild from the stored event history. This also repairs
+    # projections after a reorganization or a previously interrupted run.
+    projection_count = _rebuild_recovery_projections(
+        db=db,
+        chain_id=configured_chain_id,
+        contract_address=address,
+    )
+
+    checkpoint.updated_at = datetime.utcnow()
+    db.commit()
 
     return {
         "status": "completed",
@@ -486,5 +536,69 @@ def sync_contract_events(
         "latest_block": latest_block,
         "confirmed_block": confirmed_block,
         "last_processed_block": processed_until,
+        "blocks_processed_this_run": processed_blocks,
         "indexed_events": indexed_count,
+        "recovery_projections_rebuilt": projection_count,
+        "reorg_detected": reorg_detected,
     }
+
+def sync_contract_events(
+    db: Session,
+    max_blocks: int | None = None,
+) -> dict[str, Any]:
+    """
+    Synchronize one contract while holding a database-level lock.
+
+    PostgreSQL session-level advisory locks remain held across the
+    indexer's per-chunk commits and are released in the finally block.
+    """
+
+    lock_key = (
+        f"deaddrop:indexer:"
+        f"{settings.blockchain_chain_id}:"
+        f"{settings.blockchain_verifying_contract_address.lower()}"
+    )
+
+    dialect = db.get_bind().dialect.name
+
+    # PostgreSQL is the production locking implementation.
+    # SQLite and other test databases use the existing sync path.
+    if dialect != "postgresql":
+        return _sync_contract_events_unlocked(
+            db=db,
+            max_blocks=max_blocks,
+        )
+
+    acquired = db.execute(
+        text(
+            "SELECT pg_try_advisory_lock(hashtext(:lock_key))"
+        ),
+        {"lock_key": lock_key},
+    ).scalar()
+
+    if not acquired:
+        return {
+            "status": "already_running",
+            "message": (
+                "Another blockchain synchronization is already "
+                "running for this network and contract."
+            ),
+        }
+
+    try:
+        return _sync_contract_events_unlocked(
+            db=db,
+            max_blocks=max_blocks,
+        )
+
+    finally:
+        try:
+            db.execute(
+                text(
+                    "SELECT pg_advisory_unlock(hashtext(:lock_key))"
+                ),
+                {"lock_key": lock_key},
+            )
+            db.commit()
+        except Exception:
+            db.rollback()

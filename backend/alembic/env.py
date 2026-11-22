@@ -20,12 +20,14 @@ from app.models.blockchain_event import (
     BlockchainEvent,
     BlockchainSyncCheckpoint,
 )
+from app.models.blockchain_projection import (
+    BlockchainRecoveryProjection,
+)
 from app.models.share import EncryptedShare
 from app.models.trustee import Trustee
 from app.models.user import User
 from app.models.audit_log import AuditLog
 config = context.config
-
 
 # Use the DATABASE_URL from backend/.env
 config.set_main_option(

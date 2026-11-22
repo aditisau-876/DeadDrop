@@ -1,9 +1,6 @@
-
 import logging
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-
 from app.api import (
     auth_router,
     assets_router,
@@ -23,9 +20,45 @@ from app.services.audit_log import record_request_safely
 from app.api.blockchain_events import (
     router as blockchain_events_router,
 )
+import asyncio
+from contextlib import asynccontextmanager
+
+from app.blockchain.scheduler import (
+    automatic_sync_enabled,
+    blockchain_sync_loop,
+)
 
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    sync_task = None
+
+    if automatic_sync_enabled():
+        sync_task = asyncio.create_task(
+            blockchain_sync_loop(),
+            name="deaddrop-blockchain-sync",
+        )
+
+        logger.info(
+            "Automatic blockchain synchronization enabled."
+        )
+    else:
+        logger.info(
+            "Automatic blockchain synchronization disabled."
+        )
+
+    yield
+
+    if sync_task is not None:
+        sync_task.cancel()
+
+        try:
+            await sync_task
+        except asyncio.CancelledError:
+            logger.info(
+                "Blockchain sync scheduler stopped."
+            )
 
 app = FastAPI(
     title=settings.app_name,
@@ -34,6 +67,7 @@ app = FastAPI(
         "Emergency Recovery Protocol"
     ),
     version="0.2.0",
+    lifespan=lifespan,
 )
 
 
