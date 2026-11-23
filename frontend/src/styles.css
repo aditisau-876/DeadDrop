@@ -260,3 +260,249 @@ button.console-logout:hover:not(:disabled) { color: #fff; background: rgba(200,2
 @media (max-width: 900px) { .auth-screen { grid-template-columns: 1fr; } .auth-panel { width: min(100%, 600px); } .auth-aside { display: none; } .console-header { flex-wrap: wrap; padding-block: 14px; } .console-user-area { margin-left: auto; } }
 @media (max-width: 700px) { .console-user-copy { display: none; } .console-user-area { margin-left: auto; } }
 @media (max-width: 520px) { .auth-panel { padding: 30px 24px 48px; } .auth-symbol { margin-top: 35px; } .auth-panel h1 { font-size: 52px; } }
+
+/* Trustee approval inbox */
+
+.trustee-wallet {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid var(--dd-line);
+  background: rgba(255,255,255,.025);
+  overflow-wrap: anywhere;
+}
+
+.trustee-wallet small,
+.trustee-incident small {
+  color: var(--dd-muted);
+  font-family: var(--dd-mono);
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.trustee-wallet strong {
+  color: #e6d4b8;
+  font-family: var(--dd-mono);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.trustee-request-list {
+  display: grid;
+  gap: 16px;
+}
+
+.trustee-request {
+  padding: 20px;
+  border: 1px solid var(--dd-line);
+  background:
+    linear-gradient(120deg, rgba(200,27,28,.055), transparent 55%),
+    var(--dd-panel);
+}
+
+.trustee-request h3 {
+  margin: 7px 0;
+  overflow-wrap: anywhere;
+}
+
+.trustee-request p {
+  color: #b5b0aa;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.trustee-request .row {
+  gap: 16px;
+}
+
+.trustee-request .row strong {
+  max-width: 65%;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.trustee-incident {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--dd-line-soft);
+  background: rgba(0,0,0,.22);
+}
+
+.trustee-incident code,
+.trustee-incident span {
+  color: #d7c4a5;
+  font-family: var(--dd-mono);
+  font-size: 10px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.trustee-request button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 18px;
+  border: 1px solid rgba(200,27,28,.55);
+  background: rgba(200,27,28,.13);
+  color: #f2e9df;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background .2s ease, border-color .2s ease;
+}
+
+.trustee-request button:hover:not(:disabled) {
+  background: rgba(200,27,28,.25);
+  border-color: var(--dd-red);
+}
+
+.trustee-request button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .trustee-request {
+    padding: 15px;
+  }
+
+  .trustee-request .section-heading {
+    align-items: flex-start;
+  }
+}
+
+/* =========================================
+   DEAD DROP - METAMASK WALLET CONNECTION
+========================================= */
+
+.console-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 22px;
+  min-width: 0;
+}
+
+.console-wallet-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+.console-wallet-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 15px;
+  border: 1px solid rgba(160, 130, 255, 0.45);
+  border-radius: 8px;
+  background: rgba(120, 91, 220, 0.13);
+  color: #c9baff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.console-wallet-button:hover {
+  background: rgba(120, 91, 220, 0.25);
+  border-color: #a58aff;
+  transform: translateY(-1px);
+}
+
+.console-wallet-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid rgba(93, 211, 159, 0.25);
+  border-radius: 8px;
+  background: rgba(93, 211, 159, 0.07);
+}
+
+.console-wallet-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5dd39f;
+  box-shadow: 0 0 9px rgba(93, 211, 159, 0.7);
+}
+
+.console-wallet-address {
+  color: #d8d1ed;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.console-wallet-network {
+  color: #70d9ad;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.console-wallet-disconnect {
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: transparent;
+  color: #a9a2b9;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.console-wallet-disconnect:hover {
+  border-color: rgba(255, 110, 110, 0.5);
+  color: #ff9999;
+}
+
+.console-wallet-error {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 9px);
+  right: 0;
+  width: max-content;
+  max-width: 300px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 100, 100, 0.35);
+  border-radius: 7px;
+  background: #24191d;
+  color: #ffaaaa;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+@media (max-width: 1050px) {
+  .console-header-actions {
+    gap: 12px;
+  }
+
+  .console-wallet-network {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .console-header {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .console-header-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .console-wallet-area {
+    flex-wrap: wrap;
+  }
+}
