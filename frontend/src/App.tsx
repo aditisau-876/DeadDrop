@@ -8,7 +8,7 @@ import { Policies } from "./pages/Policies";
 import { Readiness } from "./pages/Readiness";
 import { Recovery } from "./pages/Recovery";
 import { Register } from "./pages/Register";
-
+import { TrusteeApprovals } from "./pages/TrusteeApprovals";
 export default function App() {
   return (
     <AuthProvider>
@@ -22,6 +22,7 @@ export default function App() {
             <Route path="/policies" element={<Policies />} />
             <Route path="/recovery" element={<Recovery />} />
             <Route path="/readiness" element={<Readiness />} />
+            <Route element={<ProtectedRoute allowedRoles={["trustee"]} />}><Route path="/trustee-approvals" element={<TrusteeApprovals />} /></Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Route>

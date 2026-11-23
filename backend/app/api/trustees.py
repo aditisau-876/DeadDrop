@@ -87,6 +87,41 @@ def get_trustee(
 
     return trustee
 
+@router.get(
+    "/me",
+    response_model=TrusteeResponse,
+)
+def get_my_trustee_profile(
+    db: Session = Depends(get_db),
+    user=Depends(require_roles("trustee")),
+):
+    """
+    Return the trustee profile linked to the authenticated account.
+    """
+
+    trustee = db.scalar(
+        select(Trustee).where(
+            Trustee.user_id == user.id
+        )
+    )
+
+    if trustee is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No trustee profile is linked to this account. "
+                "Contact the DeadDrop administrator."
+            ),
+        )
+
+    if not trustee.active:
+        raise HTTPException(
+            status_code=403,
+            detail="Your trustee profile is inactive.",
+        )
+
+    return trustee
+
 
 @router.patch(
     "/{trustee_id}/status",

@@ -1,1 +1,0 @@
-{"id":"ad3a6fe9acaa89b7","source_id_to_path":{"0":"script/DeployDeadDrop.s.sol","1":"src/DeadDrop.sol","2":"test/DeadDrop.t.sol"},"language":"Solidity","source_edits":{"2":[{"start":1145,"end":1159,"len":196},{"start":5430,"end":5430,"len":1001}]}}

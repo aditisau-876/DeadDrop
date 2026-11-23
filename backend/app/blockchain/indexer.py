@@ -542,15 +542,17 @@ def _sync_contract_events_unlocked(
         "reorg_detected": reorg_detected,
     }
 
+
 def sync_contract_events(
     db: Session,
     max_blocks: int | None = None,
 ) -> dict[str, Any]:
     """
-    Synchronize one contract while holding a database-level lock.
+    Synchronize one contract while holding a PostgreSQL advisory lock.
 
-    PostgreSQL session-level advisory locks remain held across the
-    indexer's per-chunk commits and are released in the finally block.
+    The lock uses a dedicated database connection. This connection remains
+    checked out for the entire synchronization, even when the indexer's
+    normal database session commits individual chunks.
     """
 
     lock_key = (
@@ -559,46 +561,73 @@ def sync_contract_events(
         f"{settings.blockchain_verifying_contract_address.lower()}"
     )
 
-    dialect = db.get_bind().dialect.name
+    bind = db.get_bind()
 
-    # PostgreSQL is the production locking implementation.
-    # SQLite and other test databases use the existing sync path.
-    if dialect != "postgresql":
+    # SQLite and other non-PostgreSQL databases use the normal sync path.
+    if bind.dialect.name != "postgresql":
         return _sync_contract_events_unlocked(
             db=db,
             max_blocks=max_blocks,
         )
 
-    acquired = db.execute(
-        text(
-            "SELECT pg_try_advisory_lock(hashtext(:lock_key))"
-        ),
-        {"lock_key": lock_key},
-    ).scalar()
+    lock_sql = text(
+        "SELECT pg_try_advisory_lock("
+        "hashtextextended(:lock_key, 0)"
+        ")"
+    )
 
-    if not acquired:
-        return {
-            "status": "already_running",
-            "message": (
-                "Another blockchain synchronization is already "
-                "running for this network and contract."
-            ),
-        }
+    unlock_sql = text(
+        "SELECT pg_advisory_unlock("
+        "hashtextextended(:lock_key, 0)"
+        ")"
+    )
 
-    try:
-        return _sync_contract_events_unlocked(
-            db=db,
-            max_blocks=max_blocks,
-        )
-
-    finally:
-        try:
-            db.execute(
-                text(
-                    "SELECT pg_advisory_unlock(hashtext(:lock_key))"
-                ),
+    # Keep this physical connection reserved until the lock is released.
+    with bind.connect() as lock_connection:
+        acquired = bool(
+            lock_connection.execute(
+                lock_sql,
                 {"lock_key": lock_key},
+            ).scalar()
+        )
+
+        if not acquired:
+            return {
+                "status": "already_running",
+                "message": (
+                    "Another blockchain synchronization is already "
+                    "running for this network and contract."
+                ),
+            }
+
+        # The advisory lock is session-level, so committing this transaction
+        # does not release the lock. It does keep the connection pinned here.
+        lock_connection.commit()
+
+        try:
+            return _sync_contract_events_unlocked(
+                db=db,
+                max_blocks=max_blocks,
             )
-            db.commit()
-        except Exception:
-            db.rollback()
+
+        finally:
+            try:
+                unlocked = bool(
+                    lock_connection.execute(
+                        unlock_sql,
+                        {"lock_key": lock_key},
+                    ).scalar()
+                )
+
+                lock_connection.commit()
+
+                if not unlocked:
+                    raise RuntimeError(
+                        "PostgreSQL advisory lock could not be released."
+                    )
+
+            except Exception:
+                # If unlocking fails, invalidate the physical connection.
+                # Closing a PostgreSQL session releases its session-level lock.
+                lock_connection.invalidate()
+                raise

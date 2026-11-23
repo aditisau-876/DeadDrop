@@ -153,8 +153,6 @@ contract DeadDrop {
         Policy storage policy = policies[policyKey];
         require(bytes(recoveryId).length > 0, "EMPTY_RECOVERY_ID");
         require(bytes(policyId).length > 0, "EMPTY_POLICY_ID");
-        require(bytes(trusteeId).length > 0, "EMPTY_TRUSTEE_ID");
-        require(bytes(incidentHash).length > 0, "EMPTY_INCIDENT_HASH");
         require(policy.active, "POLICY_INACTIVE");
         require(recoveryKey != bytes32(0), "EMPTY_RECOVERY_ID");
         require(recoveries[recoveryKey].state == RecoveryState.None, "RECOVERY_EXISTS");
