@@ -506,3 +506,42 @@ button.console-logout:hover:not(:disabled) { color: #fff; background: rgba(200,2
     flex-wrap: wrap;
   }
 }
+
+
+/* Policy and asset workflow additions */
+.policy-trustee-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.policy-trustee-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--dd-border, rgba(255,255,255,.12));
+  border-radius: 10px;
+  background: rgba(255,255,255,.025);
+  cursor: pointer;
+}
+.policy-trustee-option input { margin-top: 3px; accent-color: var(--dd-red); }
+.policy-trustee-option strong { display: block; color: #f2f0ed; font-size: 12px; font-weight: 500; }
+.policy-trustee-option .block-muted { display: block; margin-top: 4px; }
+.asset-workflow-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.asset-workflow-actions button { flex: 0 0 auto; }
+
+.recovery-result {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+.recovery-result textarea {
+  width: 100%;
+  resize: vertical;
+  color: #f2f0ed;
+  background: rgba(255,255,255,.035);
+  border: 1px solid var(--dd-border, rgba(255,255,255,.12));
+  border-radius: 10px;
+  padding: 14px;
+  line-height: 1.65;
+}

@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 const ownerLinks = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/policies", label: "Policies" },
+  { to: "/assets", label: "Protected Assets" },
   { to: "/readiness", label: "Readiness" },
   { to: "/recovery", label: "Recovery" },
 ];
@@ -19,6 +20,7 @@ const trusteeLinks = [
 const adminLinks = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/policies", label: "Policies" },
+  { to: "/assets", label: "Protected Assets" },
   { to: "/readiness", label: "Readiness" },
   { to: "/recovery", label: "Recovery" },
   { to: "/admin", label: "Administration" },
@@ -26,24 +28,6 @@ const adminLinks = [
 
 const DEAD_DROP_CHAIN_ID = "0x7a69"; // 31337
 const DEAD_DROP_CHAIN_NUMBER = 31337;
-
-type EthereumProvider = {
-  request: (args: {
-    method: string;
-    params?: unknown[];
-  }) => Promise<unknown>;
-  on?: (event: string, callback: (...args: unknown[]) => void) => void;
-  removeListener?: (
-    event: string,
-    callback: (...args: unknown[]) => void
-  ) => void;
-};
-
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
-  }
-}
 
 function DeadDropMark() {
   return (
@@ -135,7 +119,7 @@ export function Shell() {
     };
   }, []);
 
-  async function switchToDeadDropNetwork(provider: EthereumProvider) {
+  async function switchToDeadDropNetwork(provider: NonNullable<Window["ethereum"]>) {
     try {
       await provider.request({
         method: "wallet_switchEthereumChain",

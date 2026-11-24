@@ -266,7 +266,7 @@ async function deriveShareEncryptionKey(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new Uint8Array(0),
+      salt: new Uint8Array(32),
       info: toArrayBuffer(hkdfInfo),
     },
     hkdfKey,
@@ -417,4 +417,214 @@ export async function decryptProtectedAsset(
       "Asset decryption failed. The recovered key or encrypted payload is invalid.",
     );
   }
+}
+
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function gfMultiply(a: number, b: number): number {
+  let result = 0;
+  let left = a & 0xff;
+  let right = b & 0xff;
+  while (right > 0) {
+    if (right & 1) result ^= left;
+    const high = left & 0x80;
+    left = (left << 1) & 0xff;
+    if (high) left ^= 0x1b;
+    right >>>= 1;
+  }
+  return result & 0xff;
+}
+
+function gfPower(value: number, exponent: number): number {
+  let result = 1;
+  let base = value & 0xff;
+  let power = exponent;
+  while (power > 0) {
+    if (power & 1) result = gfMultiply(result, base);
+    base = gfMultiply(base, base);
+    power >>>= 1;
+  }
+  return result;
+}
+
+function splitSecretGf256(
+  secret: Uint8Array,
+  threshold: number,
+  shareCount: number,
+): string[] {
+  if (threshold < 2 || threshold > shareCount || shareCount > 16) {
+    throw new Error("Invalid Shamir threshold or share count.");
+  }
+  const coefficients = Array.from({ length: secret.length }, () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(threshold - 1));
+    return Array.from(bytes);
+  });
+  const shares: string[] = [];
+  for (let x = 1; x <= shareCount; x++) {
+    const y = new Uint8Array(secret.length);
+    for (let byteIndex = 0; byteIndex < secret.length; byteIndex++) {
+      let value = secret[byteIndex];
+      let power = x;
+      for (let degree = 0; degree < threshold - 1; degree++) {
+        value ^= gfMultiply(coefficients[byteIndex][degree], power);
+        power = gfMultiply(power, x);
+      }
+      y[byteIndex] = value;
+    }
+    shares.push(JSON.stringify({
+      scheme: "deaddrop-gf256-v1",
+      x,
+      y: encodeBase64(y),
+    }));
+  }
+  return shares;
+}
+
+export function reconstructSecretFromShares(values: string[]): Uint8Array {
+  if (values.length < 2) throw new Error("At least two verified shares are required.");
+  const parsed = values.map((value) => {
+    let item: unknown;
+    try { item = JSON.parse(value); } catch { throw new Error("A share does not use the DeadDrop GF(256) format."); }
+    if (typeof item !== "object" || item === null) throw new Error("Invalid Shamir share.");
+    const share = item as { scheme?: unknown; x?: unknown; y?: unknown };
+    if (share.scheme !== "deaddrop-gf256-v1" || typeof share.x !== "number" || !Number.isInteger(share.x) || share.x < 1 || share.x > 255 || typeof share.y !== "string") {
+      throw new Error("Invalid Shamir share format.");
+    }
+    return { x: share.x, y: decodeBase64(share.y) };
+  });
+  if (new Set(parsed.map((share) => share.x)).size !== parsed.length) throw new Error("Duplicate Shamir share coordinates were supplied.");
+  const length = parsed[0].y.length;
+  if (length === 0 || parsed.some((share) => share.y.length !== length)) throw new Error("Shamir share lengths do not match.");
+  const selected = parsed.slice(0, Math.min(values.length, 16));
+  const secret = new Uint8Array(length);
+  for (let i = 0; i < selected.length; i++) {
+    let coefficient = 1;
+    for (let j = 0; j < selected.length; j++) {
+      if (i === j) continue;
+      const numerator = selected[j].x;
+      const denominator = selected[i].x ^ selected[j].x;
+      if (denominator === 0) throw new Error("Invalid duplicate Shamir coordinates.");
+      coefficient = gfMultiply(coefficient, gfMultiply(numerator, gfPower(denominator, 254)));
+    }
+    for (let byteIndex = 0; byteIndex < length; byteIndex++) {
+      secret[byteIndex] ^= gfMultiply(selected[i].y[byteIndex], coefficient);
+    }
+  }
+  return secret;
+}
+
+async function encryptShareForTrustee(
+  shareValue: string,
+  trusteePublicKeyBase64: string,
+  policyId: string,
+  trusteeId: string,
+  epoch: number,
+): Promise<{ encrypted_share: string; commitment: string }> {
+  const publicBytes = decodeBase64(trusteePublicKeyBase64);
+  if (publicBytes.length !== 32) throw new Error(`Trustee ${trusteeId} has an invalid X25519 public key.`);
+  const trusteePublicKey = await crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(publicBytes),
+    { name: "X25519" } as AlgorithmIdentifier,
+    false,
+    [],
+  );
+  const ephemeral = await crypto.subtle.generateKey(
+    { name: "X25519" } as AlgorithmIdentifier,
+    true,
+    ["deriveBits"],
+  ) as CryptoKeyPair;
+  const sharedSecret = await crypto.subtle.deriveBits(
+    { name: "X25519", public: trusteePublicKey } as EcdhKeyDeriveParams,
+    ephemeral.privateKey,
+    256,
+  );
+  const context = encoder.encode(`${policyId}:${trusteeId}:${epoch}`);
+  const hkdfKey = await crypto.subtle.importKey("raw", sharedSecret, "HKDF", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: toArrayBuffer(concatBytes(encoder.encode("DeadDrop/share-encryption/"), context)) },
+    hkdfKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt"],
+  );
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: toArrayBuffer(nonce), additionalData: toArrayBuffer(context), tagLength: 128 },
+    key,
+    encoder.encode(shareValue),
+  );
+  const ephemeralPublic = new Uint8Array(await crypto.subtle.exportKey("raw", ephemeral.publicKey));
+  const envelope = {
+    version: 1,
+    algorithm: SHARE_ALGORITHM,
+    ephemeral_public_key: encodeBase64(ephemeralPublic),
+    nonce: encodeBase64(nonce),
+    ciphertext: encodeBase64(new Uint8Array(ciphertext)),
+    policy_id: policyId,
+    trustee_id: trusteeId,
+    epoch,
+  };
+  const encrypted_share = encodeBase64(encoder.encode(JSON.stringify(envelope)));
+  const material = `deaddrop:v1|policy:${policyId}|trustee:${trusteeId}|epoch:${epoch}|share:${shareValue}`;
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(material));
+  return { encrypted_share, commitment: encodeHex(new Uint8Array(digest)) };
+}
+
+export interface AssetTrusteeInput {
+  id: string;
+  name: string;
+  public_key: string | null;
+}
+
+export async function createProtectedAssetBundle(input: {
+  plaintext: string;
+  policyId: string;
+  epoch: number;
+  threshold: number;
+  trustees: AssetTrusteeInput[];
+}): Promise<{
+  ciphertext: string;
+  nonce: string;
+  aad: string;
+  threshold: number;
+  shares: Array<{ trustee_id: string; encrypted_share: string; commitment: string; epoch: number }>;
+}> {
+  if (!globalThis.crypto?.subtle) throw new Error("Web Crypto is unavailable. Use localhost or HTTPS.");
+  if (!input.plaintext) throw new Error("Enter the asset content to protect.");
+  if (input.trustees.length < 2 || input.threshold < 2 || input.threshold > input.trustees.length) throw new Error("The threshold must be between 2 and the number of assigned trustees.");
+  if (input.trustees.some((trustee) => !trustee.public_key)) throw new Error("Every assigned trustee must have an X25519 public key configured before protecting an asset.");
+
+  const aesKeyBytes = crypto.getRandomValues(new Uint8Array(32));
+  const aesKey = await crypto.subtle.importKey("raw", toArrayBuffer(aesKeyBytes), "AES-GCM", false, ["encrypt"]);
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const aad = encoder.encode(`deaddrop:asset:${input.policyId}:${input.epoch}`);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: toArrayBuffer(nonce), additionalData: toArrayBuffer(aad), tagLength: 128 },
+    aesKey,
+    encoder.encode(input.plaintext),
+  );
+
+  const rawShares = splitSecretGf256(aesKeyBytes, input.threshold, input.trustees.length);
+  const encryptedShares = await Promise.all(input.trustees.map(async (trustee, index) => {
+    const encrypted = await encryptShareForTrustee(rawShares[index], trustee.public_key!, input.policyId, trustee.id, input.epoch);
+    return {
+      trustee_id: trustee.id,
+      encrypted_share: encrypted.encrypted_share,
+      commitment: encrypted.commitment,
+      epoch: input.epoch,
+    };
+  }));
+  return {
+    ciphertext: encodeBase64(new Uint8Array(ciphertext)),
+    nonce: encodeBase64(nonce),
+    aad: encodeBase64(aad),
+    threshold: input.threshold,
+    shares: encryptedShares,
+  };
 }

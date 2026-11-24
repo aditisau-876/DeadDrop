@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
+from web3 import Web3
 
 from app.crypto.share_envelope import (
     validate_commitment_format,
@@ -19,6 +20,7 @@ from app.crypto.signatures import (
     verify_share_release_signature,
 )
 from app.db.database import get_db
+from app.api.blockchain import blockchain as chain_client
 from app.models.asset import ProtectedAsset
 from app.models.policy import Policy
 from app.models.recovery import (
@@ -65,15 +67,22 @@ def get_release_context(
             status_code=404,
             detail="Recovery request not found.",
         )
+
     if expire_recovery_if_needed(recovery):
         db.commit()
-    release_block_reason = recovery_release_block_reason(recovery)
+
+    release_block_reason = recovery_release_block_reason(
+        recovery
+    )
 
     if recovery.status == "EXPIRED":
         db.commit()
 
     if release_block_reason:
-        raise HTTPException(status_code=409,detail=release_block_reason,)
+        raise HTTPException(
+            status_code=409,
+            detail=release_block_reason,
+        )
 
     policy = db.get(
         Policy,
@@ -180,7 +189,165 @@ def get_release_context(
             },
         )
 
+    # Verify the release conditions against the actual contract.
+    try:
+        chain_client._require_contract()
+
+        chain_policy = chain_client.get_policy(policy.id)
+        chain_recovery = chain_client.get_recovery(recovery.id)
+        chain_asset = chain_client.get_asset(asset.id)
+
+        if (
+            not chain_policy.get("exists")
+            or not chain_recovery.get("exists")
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Policy or recovery request is not "
+                    "registered on-chain."
+                ),
+            )
+
+        if chain_recovery["state"] != "REQUESTED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "On-chain recovery is not in the "
+                    "requested state."
+                ),
+            )
+
+        if (
+            int(chain_policy["version"]) != recovery.policy_version
+            or int(chain_policy["epoch"]) != recovery.policy_epoch
+            or int(chain_recovery["policy_version"])
+            != recovery.policy_version
+            or int(chain_recovery["policy_epoch"])
+            != recovery.policy_epoch
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "On-chain policy version or epoch does "
+                    "not match the recovery request."
+                ),
+            )
+
+        if (
+            int(recovery.required_approvals)
+            != int(chain_policy["quorum"])
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Database and on-chain recovery quorum "
+                    "values do not match."
+                ),
+            )
+
+        if (
+            int(chain_recovery["approvals"])
+            < int(chain_policy["quorum"])
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The on-chain trustee approval quorum "
+                    "has not been reached."
+                ),
+            )
+
+        # NEW: The specific trustee must be registered on-chain.
+        if not chain_client.is_trustee(
+            policy.id,
+            trustee.wallet_address,
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "This trustee wallet is not registered "
+                    "for the policy on-chain."
+                ),
+            )
+
+        # NEW: Overall quorum is not enough. This trustee must
+        # personally have an approval recorded on-chain.
+        if not chain_client.has_approved(
+            recovery.id,
+            trustee.wallet_address,
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "This trustee has not personally approved "
+                    "this recovery on-chain and cannot receive "
+                    "its encrypted share."
+                ),
+            )
+
+        now_timestamp = int(
+            chain_client.web3.eth.get_block("latest")["timestamp"]
+        )
+
+        if now_timestamp < int(chain_recovery["execute_after"]):
+            raise HTTPException(
+                status_code=409,
+                detail="The on-chain recovery timelock is still active.",
+            )
+
+        if now_timestamp >= int(chain_recovery["expires_at"]):
+            raise HTTPException(
+                status_code=410,
+                detail="The on-chain recovery request has expired.",
+            )
+
+        expected_policy_key = Web3.to_hex(
+            chain_client._id_hash(policy.id)
+        ).lower()
+
+        if (
+            not chain_asset.get("exists")
+            or int(chain_asset["epoch"]) != asset.epoch
+            or chain_asset["policy_key"].lower()
+            != expected_policy_key
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Protected asset commitments are not registered "
+                    "for the current policy epoch."
+                ),
+            )
+
+        onchain_commitment = chain_client.get_asset_commitment(
+            asset.id,
+            trustee.wallet_address,
+        )
+
+        if (
+            onchain_commitment.lower()
+            != ("0x" + share.commitment.lower())
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The trustee share commitment does not match "
+                    "the on-chain asset commitment."
+                ),
+            )
+
+    except HTTPException:
+        raise
+
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+
     return recovery, policy, asset, trustee, share
+
 
 
 @router.post(

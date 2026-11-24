@@ -173,19 +173,6 @@ def update_trustee_status(
             )
 
 
-        if assigned_policy is not None:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": (
-                        "This trustee is assigned to an active policy. "
-                        "Update or deactivate the policy before "
-                        "deactivating this trustee."
-                    ),
-                    "policy_id": assigned_policy,
-                },
-            )
-
     trustee.active = data.active
 
     db.commit()

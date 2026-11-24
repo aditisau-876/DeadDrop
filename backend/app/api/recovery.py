@@ -165,6 +165,15 @@ def create_recovery(
             detail="This policy is inactive.",
         )
 
+    if (
+        policy.expiry_seconds is not None
+        and policy.expiry_seconds <= (policy.timelock_seconds or 0)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Policy expiry must be longer than its recovery timelock.",
+        )
+
     if not policy.policy_tree:
         raise HTTPException(
             status_code=409,

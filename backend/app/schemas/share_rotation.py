@@ -35,3 +35,7 @@ class ShareRotationResponse(BaseModel):
     updated_asset_count: int
     inserted_share_count: int
     message: str
+
+
+class OnchainShareRotationFinalizeRequest(ShareRotationRequest):
+    transaction_hash: str = Field(min_length=64, max_length=66, pattern=r"^(0x)?[0-9a-fA-F]{64}$")

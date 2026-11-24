@@ -84,6 +84,11 @@ def protect_asset(
             status_code=400,
             detail="The policy has no assigned trustees.",
         )
+    if len(expected_trustees) > 16:
+        raise HTTPException(
+            status_code=422,
+            detail="The current GF(256) share scheme supports at most 16 trustees per asset.",
+        )
 
     # Cryptographic threshold validation.
     if data.threshold > len(expected_trustees):
@@ -350,6 +355,27 @@ def get_asset_readiness(
         db,
         asset,
     )
+
+
+@router.get("/{asset_id}/encrypted-payload")
+def get_encrypted_asset_payload(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    asset = db.get(ProtectedAsset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Protected asset not found.")
+    ensure_owner_or_admin(user, asset.owner_user_id)
+    return {
+        "id": asset.id,
+        "policy_id": asset.policy_id,
+        "ciphertext": asset.ciphertext,
+        "nonce": asset.nonce,
+        "aad": asset.aad,
+        "epoch": asset.epoch,
+        "threshold": asset.threshold,
+    }
 
 
 @router.get(

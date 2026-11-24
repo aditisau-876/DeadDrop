@@ -46,3 +46,30 @@ The current Solidity contract enforces a **flat trustee quorum**. The backend su
 The contract stores hashes and authorization metadata only. It does not store plaintext secrets, encrypted share payloads, or perform client-side share reconstruction. Updating commitments and incrementing an epoch is not itself proactive secret-share refresh.
 
 Before any real-value deployment, add deployment/network configuration, monitoring, emergency pause/recovery procedures, and obtain an independent Solidity and cryptographic audit. The deployment script and tests are development scaffolding, not an audit or production approval.
+
+## Asset-scoped commitment registration (current integration)
+
+New policy registrations use the five-argument overload:
+
+```solidity
+registerPolicy(policyId, policyHash, trusteeWallets, quorum, timelockDuration)
+```
+
+A policy can therefore be registered before any protected asset exists. After the backend stores an encrypted asset and one encrypted share/commitment for each assigned trustee, the owner registers that asset's commitment set separately:
+
+```solidity
+registerAssetCommitments(
+    assetId,
+    policyId,
+    assetHash,
+    epoch,
+    trusteeWallets,
+    shareCommitments
+)
+```
+
+The contract binds each commitment to `keccak256(assetId)` and the assigned trustee wallet. Two assets under the same policy have independent commitment records. The legacy policy-level commitment overload and getter remain for compatibility with earlier local deployments; new application flows must not use them.
+
+The frontend obtains canonical payloads from the authenticated backend, submits transactions through MetaMask, and asks the backend to verify the mined transaction and every on-chain field. Do not treat a submitted transaction hash alone as proof of successful registration.
+
+`executeRecovery` also stores the supplied artifact digest in `recoveryArtifactHashes(recoveryKey)`. The backend verifies this value against the transaction input before it marks the database recovery as executed.

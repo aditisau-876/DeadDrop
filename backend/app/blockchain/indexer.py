@@ -54,6 +54,17 @@ EVENT_ABI = [
     {
         "anonymous": False,
         "type": "event",
+        "name": "AssetCommitmentsRegistered",
+        "inputs": [
+            {"indexed": True, "name": "assetKey", "type": "bytes32"},
+            {"indexed": True, "name": "policyKey", "type": "bytes32"},
+            {"indexed": False, "name": "assetHash", "type": "bytes32"},
+            {"indexed": False, "name": "epoch", "type": "uint64"},
+        ],
+    },
+    {
+        "anonymous": False,
+        "type": "event",
         "name": "RecoveryRequested",
         "inputs": [
             {"indexed": True, "name": "recoveryKey", "type": "bytes32"},
@@ -445,6 +456,7 @@ def _sync_contract_events_unlocked(
             "PolicyRegistered",
             "PolicyStatusChanged",
             "ShareCommitmentsUpdated",
+            "AssetCommitmentsRegistered",
             "RecoveryRequested",
             "ApprovalSubmitted",
             "RecoveryExecuted",
