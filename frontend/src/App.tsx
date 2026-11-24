@@ -3,6 +3,8 @@ import { AuthProvider } from "./auth/AuthContext";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { Shell } from "./components/Shell";
 import { Dashboard } from "./pages/Dashboard";
+import { Admin } from "./pages/Admin";
+import { Assets } from "./pages/Assets";
 import { Login } from "./pages/Login";
 import { Policies } from "./pages/Policies";
 import { Readiness } from "./pages/Readiness";
@@ -20,9 +22,11 @@ export default function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/policies" element={<Policies />} />
+            <Route path="/assets" element={<Assets />} />
             <Route path="/recovery" element={<Recovery />} />
             <Route path="/readiness" element={<Readiness />} />
             <Route element={<ProtectedRoute allowedRoles={["trustee"]} />}><Route path="/trustee-approvals" element={<TrusteeApprovals />} /></Route>
+            <Route element={<ProtectedRoute allowedRoles={["admin"]} />}><Route path="/admin" element={<Admin />} /></Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Route>

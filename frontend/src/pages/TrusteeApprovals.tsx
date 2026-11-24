@@ -1,8 +1,14 @@
 
 import { useCallback, useEffect, useState } from "react";
+import { BrowserProvider, Contract, keccak256, toUtf8Bytes } from "ethers";
 import { Page } from "../components/Page";
 import { authApiRequest } from "../lib/authApi";
 import { signRecoveryApproval } from "../lib/crypto/recoveryApproval";
+
+const approvalContractAbi = [
+  "function submitApproval(string recoveryId,string policyId,string trusteeId,string incidentHash,bytes signature)",
+  "function approved(bytes32 recoveryKey,address trustee) view returns (bool)",
+];
 
 interface TrusteeProfile {
   id: string;
@@ -85,10 +91,8 @@ export function TrusteeApprovals() {
       return;
     }
 
-    if (recovery.status !== "PENDING") {
-      setError(
-        "Only pending recovery requests can be approved.",
-      );
+    if (!(["PENDING", "APPROVED"] as string[]).includes(recovery.status)) {
+      setError("This recovery request is no longer eligible for approval relay.");
       return;
     }
 
@@ -97,44 +101,95 @@ export function TrusteeApprovals() {
     setSuccess("");
 
     try {
-      // Step 1: Construct the exact EIP-712 approval payload.
-      const signature = await signRecoveryApproval(
-        {
-          recoveryId: recovery.id,
-          policyId: recovery.policy_id,
-          trusteeId: trustee.id,
-          incidentHash: recovery.incident_hash,
-          policyVersion: recovery.policy_version,
-          policyEpoch: recovery.policy_epoch,
-        },
-        trustee.wallet_address,
-      );
+      // Step 1: Reuse a previously stored signature when the backend
+      // approval succeeded but its blockchain relay did not.
+      let signature: string;
+      let updated: RecoveryItem;
+      if (recovery.status === "APPROVED") {
+        const stored = await authApiRequest<{ signature: string }>(
+          `/api/blockchain/registration/recoveries/${encodeURIComponent(recovery.id)}/approvals/${encodeURIComponent(trustee.id)}`,
+        );
+        signature = stored.signature;
+        updated = recovery;
+      } else {
+        signature = await signRecoveryApproval(
+          {
+            recoveryId: recovery.id,
+            policyId: recovery.policy_id,
+            trusteeId: trustee.id,
+            incidentHash: recovery.incident_hash,
+            policyVersion: recovery.policy_version,
+            policyEpoch: recovery.policy_epoch,
+          },
+          trustee.wallet_address,
+        );
 
-      // Step 2: Submit the signature to the existing API.
-      const updated = await authApiRequest<RecoveryItem>(
-        `/api/recovery/${encodeURIComponent(recovery.id)}/approve`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            recovery_id: recovery.id,
-            trustee_id: trustee.id,
+        try {
+          updated = await authApiRequest<RecoveryItem>(
+            `/api/recovery/${encodeURIComponent(recovery.id)}/approve`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                recovery_id: recovery.id,
+                trustee_id: trustee.id,
+                signature,
+              }),
+            },
+          );
+        } catch (approvalError) {
+          const message = approvalError instanceof Error ? approvalError.message : "";
+          if (!message.toLowerCase().includes("already approved")) throw approvalError;
+          const stored = await authApiRequest<{ signature: string }>(
+            `/api/blockchain/registration/recoveries/${encodeURIComponent(recovery.id)}/approvals/${encodeURIComponent(trustee.id)}`,
+          );
+          signature = stored.signature;
+          updated = await authApiRequest<RecoveryItem>(
+            `/api/recovery/${encodeURIComponent(recovery.id)}`,
+          );
+        }
+      }
+
+      setRecoveries((current) => current.map((item) => item.id === updated.id ? updated : item));
+
+      // Step 3: Relay the exact backend-verified signature to Solidity.
+      try {
+        if (!window.ethereum) throw new Error("MetaMask was not detected.");
+        const status = await authApiRequest<{
+          configured_chain_id: number;
+          contract_address: string | null;
+        }>("/api/blockchain/status");
+        if (!status.contract_address) throw new Error("DeadDrop contract address is not configured on the backend.");
+        const provider = new BrowserProvider(window.ethereum);
+        const network = await provider.getNetwork();
+        if (Number(network.chainId) !== status.configured_chain_id) {
+          throw new Error(`Switch MetaMask to chain ID ${status.configured_chain_id}.`);
+        }
+        const signer = await provider.getSigner();
+        const contract = new Contract(status.contract_address, approvalContractAbi, signer);
+        const recoveryKey = keccak256(toUtf8Bytes(recovery.id));
+        const alreadyRelayed = await contract.approved(recoveryKey, trustee.wallet_address);
+        let transactionHash = "already recorded on-chain";
+        if (!alreadyRelayed) {
+          const tx = await contract.submitApproval(
+            recovery.id,
+            recovery.policy_id,
+            trustee.id,
+            recovery.incident_hash,
             signature,
-          }),
-        },
-      );
+          );
+          const receipt = await tx.wait();
+          if (!receipt || receipt.status !== 1) throw new Error("The approval relay transaction failed.");
+          transactionHash = tx.hash;
+        }
+        const chainRecovery = await authApiRequest<{ blockchain: { approvals: number } }>(
+          `/api/blockchain/contract/recoveries/${encodeURIComponent(recovery.id)}`,
+        );
+        setSuccess(`Approval verified by the backend and recorded on-chain. On-chain approvals: ${chainRecovery.blockchain.approvals}. Transaction: ${transactionHash}`);
+      } catch (relayError) {
+        const relayMessage = relayError instanceof Error ? relayError.message : "Unknown blockchain relay error.";
+        setError(`Your trustee approval is saved and verified by the backend, but on-chain relay did not complete: ${relayMessage} You can click Approve again to retry the relay.`);
+      }
 
-      // Step 3: Update the displayed recovery status.
-      setRecoveries((current) =>
-        current.map((item) =>
-          item.id === updated.id ? updated : item,
-        ),
-      );
-
-      setSuccess(
-        `Approval submitted successfully. Current approvals: ${updated.approvals} / ${updated.required_approvals}.`,
-      );
-
-      // Refresh from the backend to get the latest state.
       await loadInbox();
     } catch (err) {
       setError(
@@ -350,8 +405,17 @@ export function TrusteeApprovals() {
                 <div className="row" key={recovery.id}>
                   <span>
                     {recovery.id.slice(0, 16)}
+                    <small className="block-muted">{recovery.status}</small>
                   </span>
-                  <strong>{recovery.status}</strong>
+                  {recovery.status === "APPROVED" && (
+                    <button
+                      type="button"
+                      disabled={approvingId !== "" || !trustee?.wallet_address}
+                      onClick={() => void handleApprove(recovery)}
+                    >
+                      {approvingId === recovery.id ? "RELAYING…" : "RETRY ON-CHAIN RELAY"}
+                    </button>
+                  )}
                 </div>
               ))
             )}

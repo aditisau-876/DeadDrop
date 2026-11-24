@@ -1,16 +1,10 @@
 
 import {
   BrowserProvider,
-  type Eip1193Provider,
   type TypedDataDomain,
   type TypedDataField,
 } from "ethers";
 
-declare global {
-  interface Window {
-    ethereum?: Eip1193Provider;
-  }
-}
 
 export interface RecoveryApprovalPayload {
   recoveryId: string;
@@ -89,10 +83,10 @@ export async function signRecoveryApproval(
       name: "DeadDrop",
       version: "1",
       chainId: Number(
-        import.meta.env.VITE_BLOCKCHAIN_CHAIN_ID,
+        import.meta.env.VITE_CHAIN_ID,
       ),
       verifyingContract:
-        import.meta.env.VITE_BLOCKCHAIN_CONTRACT_ADDRESS,
+        import.meta.env.VITE_CONTRACT_ADDRESS,
     },
 
     message: {

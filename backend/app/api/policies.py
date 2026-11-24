@@ -10,6 +10,7 @@ from app.core.security import (
     require_roles,
 )
 from app.db.database import get_db
+from app.api.blockchain import blockchain
 from app.models.policy import Policy
 from app.models.recovery import RecoveryRequest
 from app.models.trustee import Trustee
@@ -47,6 +48,31 @@ def get_policy_or_404(
         )
 
     return policy
+
+
+def ensure_policy_not_registered_onchain(policy_id: str) -> None:
+    """Prevent DB-only edits that would silently desynchronize Solidity state."""
+    if not blockchain.contract_address_configured:
+        return
+    if not blockchain.connected:
+        raise HTTPException(
+            status_code=503,
+            detail="Blockchain RPC is unavailable. Policy changes are blocked until on-chain synchronization can be checked.",
+        )
+    try:
+        onchain = blockchain.get_policy(policy_id)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if onchain.get("exists"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This policy is already registered on-chain. Database-only edits are blocked "
+                "because the current contract does not yet expose a complete policy-update "
+                "transaction for trustee/quorum/version synchronization. Create a new policy "
+                "or use a future coordinated on-chain policy migration."
+            ),
+        )
 
 
 def ensure_no_active_recoveries(
@@ -238,6 +264,7 @@ def update_policy(
         user,
         policy.owner_user_id,
     )
+    ensure_policy_not_registered_onchain(policy.id)
 
     if data.expected_version != policy.version:
         raise HTTPException(
@@ -332,6 +359,7 @@ def deactivate_policy(
         user,
         policy.owner_user_id,
     )
+    ensure_policy_not_registered_onchain(policy.id)
 
     if not policy.active:
         return policy

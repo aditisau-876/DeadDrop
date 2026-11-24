@@ -1,16 +1,10 @@
 
 import {
   BrowserProvider,
-  type Eip1193Provider,
   type TypedDataDomain,
   type TypedDataField,
 } from "ethers";
 
-declare global {
-  interface Window {
-    ethereum?: Eip1193Provider;
-  }
-}
 
 export interface ShareReleaseChallenge {
   challenge_id: string;

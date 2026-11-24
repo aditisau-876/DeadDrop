@@ -1,0 +1,1 @@
+{"id":"fe4692e38c2bf043","source_id_to_path":{"0":"src/DeadDrop.sol","1":"test/DeadDrop.t.sol","2":"test/DeadDropShareRotation.t.sol"},"language":"Solidity","source_edits":{"1":[{"start":1223,"end":1237,"len":196},{"start":12533,"end":12533,"len":1001}],"2":[{"start":548,"end":562,"len":196},{"start":8979,"end":8979,"len":1001}]}}

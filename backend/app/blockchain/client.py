@@ -50,6 +50,13 @@ DEADDROP_ABI = [
     },
     {
         "type": "function",
+        "name": "recoveryArtifactHashes",
+        "stateMutability": "view",
+        "inputs": [{"name": "", "type": "bytes32"}],
+        "outputs": [{"name": "", "type": "bytes32"}],
+    },
+    {
+        "type": "function",
         "name": "trusteeCount",
         "stateMutability": "view",
         "inputs": [{"name": "", "type": "bytes32"}],
@@ -74,6 +81,49 @@ DEADDROP_ABI = [
             {"name": "", "type": "address"},
         ],
         "outputs": [{"name": "", "type": "bool"}],
+    },
+    {
+        "type": "function",
+        "name": "assets",
+        "stateMutability": "view",
+        "inputs": [{"name": "", "type": "bytes32"}],
+        "outputs": [
+            {"name": "policyKey", "type": "bytes32"},
+            {"name": "assetHash", "type": "bytes32"},
+            {"name": "epoch", "type": "uint64"},
+            {"name": "exists", "type": "bool"},
+        ],
+    },
+    {
+        "type": "function",
+        "name": "policyAssetCount",
+        "stateMutability": "view",
+        "inputs": [{"name": "", "type": "bytes32"}],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+    {
+        "type": "function",
+        "name": "rotatePolicyAssetCommitments",
+        "stateMutability": "nonpayable",
+        "inputs": [
+            {"name": "policyId", "type": "string"},
+            {"name": "expectedEpoch", "type": "uint64"},
+            {"name": "newEpoch", "type": "uint64"},
+            {"name": "assetIds", "type": "string[]"},
+            {"name": "trusteeWallets", "type": "address[]"},
+            {"name": "newCommitments", "type": "bytes32[][]"},
+        ],
+        "outputs": [],
+    },
+    {
+        "type": "function",
+        "name": "getAssetCommitment",
+        "stateMutability": "view",
+        "inputs": [
+            {"name": "assetId", "type": "string"},
+            {"name": "trusteeWallet", "type": "address"},
+        ],
+        "outputs": [{"name": "", "type": "bytes32"}],
     },
     {
         "type": "function",
@@ -299,6 +349,29 @@ class BlockchainClient:
                 for item in commitments
             ],
         }
+
+    def get_asset(self, asset_id: str) -> dict:
+        contract = self._require_contract()
+        key = self._id_hash(asset_id)
+        policy_key, asset_hash, epoch, exists = contract.functions.assets(key).call()
+        return {
+            "exists": bool(exists),
+            "asset_id": asset_id,
+            "asset_key": Web3.to_hex(key),
+            "policy_key": Web3.to_hex(policy_key),
+            "asset_hash": Web3.to_hex(asset_hash),
+            "epoch": int(epoch),
+        }
+
+    def get_asset_commitment(self, asset_id: str, wallet_address: str) -> str:
+        contract = self._require_contract()
+        if not Web3.is_address(wallet_address):
+            raise ValueError("Invalid trustee wallet address.")
+        value = contract.functions.getAssetCommitment(
+            asset_id,
+            Web3.to_checksum_address(wallet_address),
+        ).call()
+        return Web3.to_hex(value)
 
     def is_trustee(
         self,

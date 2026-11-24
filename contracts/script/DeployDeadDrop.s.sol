@@ -12,8 +12,7 @@ interface VmDeploy {
 /// @notice Deploys the DeadDrop registry/state-machine contract.
 /// @dev Set DEPLOYER_PRIVATE_KEY in the environment before running.
 contract DeployDeadDrop {
-    VmDeploy private constant vm =
-        VmDeploy(address(uint160(uint256(keccak256("hevm cheat code")))));
+    VmDeploy private constant vm = VmDeploy(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     function run() external returns (DeadDrop deployed) {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
