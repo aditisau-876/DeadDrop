@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -9,6 +8,7 @@ const ownerLinks = [
   { to: "/assets", label: "Protected Assets" },
   { to: "/readiness", label: "Readiness" },
   { to: "/recovery", label: "Recovery" },
+  { to: "/rotation", label: "Share Rotation" },
 ];
 
 const trusteeLinks = [
@@ -23,6 +23,7 @@ const adminLinks = [
   { to: "/assets", label: "Protected Assets" },
   { to: "/readiness", label: "Readiness" },
   { to: "/recovery", label: "Recovery" },
+  { to: "/rotation", label: "Share Rotation" },
   { to: "/admin", label: "Administration" },
 ];
 

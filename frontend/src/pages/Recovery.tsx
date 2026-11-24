@@ -1,4 +1,3 @@
-
 import { useEffect, useState, type FormEvent } from "react";
 import {
   BrowserProvider,
@@ -21,6 +20,7 @@ import {
   signShareReleaseChallenge,
   type ShareReleaseChallenge,
 } from "../lib/crypto/shareRelease";
+import { storeRecoveredAssetKey } from "../lib/crypto/rotationKeyVault";
 
 interface ReleasedShare {
   recovery_id: string;
@@ -810,6 +810,16 @@ export function Recovery() {
 
       const plaintext = new TextDecoder().decode(
         plaintextBytes,
+      );
+
+      // Keep the authenticated AES key only in this browser tab so an
+      // owner can later rotate every asset under the same policy.
+      // The key is never sent to the backend or persisted to storage.
+      storeRecoveredAssetKey(
+        encryptedPayload.policy_id,
+        encryptedPayload.id,
+        encryptedPayload.epoch,
+        aesKey,
       );
 
       setRecoveredContent(plaintext);
