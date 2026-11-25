@@ -16,6 +16,7 @@ from app.models.blockchain_event import (
 from app.models.blockchain_projection import (
     BlockchainRecoveryProjection,
 )
+from app.models.share_rotation_attempt import ShareRotationAttempt
 
 __all__ = [
     "ProtectedAsset",
@@ -30,4 +31,5 @@ __all__ = [
     "BlockchainEvent",
     "BlockchainSyncCheckpoint",
     "BlockchainRecoveryProjection",
+    "ShareRotationAttempt",
 ]

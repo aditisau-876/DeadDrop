@@ -51,6 +51,28 @@ EVENT_ABI = [
             {"indexed": False, "name": "epoch", "type": "uint64"},
         ],
     },
+        {
+        "anonymous": False,
+        "type": "event",
+        "name": "PolicyShareEpochRotated",
+        "inputs": [
+            {"indexed": True, "name": "policyKey", "type": "bytes32"},
+            {"indexed": False, "name": "previousEpoch", "type": "uint64"},
+            {"indexed": False, "name": "newEpoch", "type": "uint64"},
+            {"indexed": False, "name": "assetCount", "type": "uint256"},
+        ],
+    },
+    {
+        "anonymous": False,
+        "type": "event",
+        "name": "AssetShareCommitmentsRotated",
+        "inputs": [
+            {"indexed": True, "name": "assetKey", "type": "bytes32"},
+            {"indexed": True, "name": "policyKey", "type": "bytes32"},
+            {"indexed": False, "name": "previousEpoch", "type": "uint64"},
+            {"indexed": False, "name": "newEpoch", "type": "uint64"},
+        ],
+    },
     {
         "anonymous": False,
         "type": "event",
@@ -111,6 +133,23 @@ RECOVERY_EVENTS = {
     "RecoveryExecuted",
     "RecoveryCancelled",
 }
+ROTATION_EVENTS = {
+    "PolicyShareEpochRotated",
+    "AssetShareCommitmentsRotated",
+}
+
+INDEXED_EVENT_NAMES = (
+    "PolicyRegistered",
+    "PolicyStatusChanged",
+    "ShareCommitmentsUpdated",
+    "PolicyShareEpochRotated",
+    "AssetShareCommitmentsRotated",
+    "AssetCommitmentsRegistered",
+    "RecoveryRequested",
+    "ApprovalSubmitted",
+    "RecoveryExecuted",
+    "RecoveryCancelled",
+)
 
 
 def _hex(value: Any) -> str:
@@ -452,16 +491,7 @@ def _sync_contract_events_unlocked(
             confirmed_block,
         )
 
-        for event_name in [
-            "PolicyRegistered",
-            "PolicyStatusChanged",
-            "ShareCommitmentsUpdated",
-            "AssetCommitmentsRegistered",
-            "RecoveryRequested",
-            "ApprovalSubmitted",
-            "RecoveryExecuted",
-            "RecoveryCancelled",
-        ]:
+        for event_name in INDEXED_EVENT_NAMES:
             event_factory = getattr(
                 contract.events,
                 event_name,
