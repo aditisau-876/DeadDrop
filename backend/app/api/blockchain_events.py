@@ -16,6 +16,9 @@ from app.models.blockchain_projection import (
 from app.blockchain.reconciliation import (
     reconcile_blockchain_state,
 )
+from app.blockchain.rotation_reconciliation import (
+    reconcile_rotation_state,
+)
 
 router = APIRouter(
     prefix="/api/blockchain/events",
@@ -209,4 +212,29 @@ def reconcile_blockchain(
         raise HTTPException(
             status_code=500,
             detail="Blockchain reconciliation failed.",
+        ) from exc
+
+@router.get("/reconcile/rotations")
+def reconcile_blockchain_rotations(
+    db: Session = Depends(get_db),
+    admin=Depends(require_roles("admin")),
+):
+    """
+    Compare database policy and asset epochs with confirmed
+    on-chain state. This endpoint is read-only.
+    """
+    try:
+        return reconcile_rotation_state(db)
+
+    except (ConnectionError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Blockchain rotation reconciliation failed.",
         ) from exc

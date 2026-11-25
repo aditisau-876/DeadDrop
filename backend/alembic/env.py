@@ -23,6 +23,7 @@ from app.models.blockchain_event import (
 from app.models.blockchain_projection import (
     BlockchainRecoveryProjection,
 )
+from app.models.share_rotation_attempt import ShareRotationAttempt
 from app.models.share import EncryptedShare
 from app.models.trustee import Trustee
 from app.models.user import User
